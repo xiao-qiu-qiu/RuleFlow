@@ -23,7 +23,7 @@ const TARGETS = [
   { label: "Sing-Box", value: "sing-box" },
 ];
 
-const emptyForm = { name: "", description: "", target: "clash-mihomo", template_name: "", enabled: true, subscription_ids: [] as number[], node_ids: [] as number[] };
+const emptyForm = { name: "", description: "", target: "clash-mihomo", template_name: "", enabled: true, include_all_subscriptions: false, subscription_ids: [] as number[], node_ids: [] as number[] };
 
 export default function ConfigsPage() {
   const qc = useQueryClient();
@@ -65,7 +65,7 @@ export default function ConfigsPage() {
     setEditId(p.id);
     setForm({
       name: p.name, description: p.description, target: p.target,
-      template_name: p.template_name, enabled: p.enabled,
+      template_name: p.template_name, enabled: p.enabled, include_all_subscriptions: p.include_all_subscriptions,
       subscription_ids: p.subscription_ids || [], node_ids: p.node_ids || [],
     });
     setDialogOpen(true);
@@ -136,7 +136,7 @@ export default function ConfigsPage() {
                 </div>
                 <div className="flex flex-wrap gap-1.5 text-xs">
                   <span className="text-muted-foreground">模板：{p.template_name || "—"}</span>
-                  <span className="text-muted-foreground">• 订阅：{p.subscription_ids?.length || 0}</span>
+                  <span className="text-muted-foreground">• 订阅：{p.include_all_subscriptions ? "全部启用" : (p.subscription_ids?.length || 0)}</span>
                   <span className="text-muted-foreground">• 节点：{p.node_ids?.length || 0}</span>
                 </div>
                 <div className="flex items-center gap-1.5 text-xs bg-muted rounded-md px-2 py-1.5">
@@ -178,6 +178,7 @@ export default function ConfigsPage() {
             </div>
             <div className="space-y-2"><Label>描述</Label><Textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} rows={2} /></div>
             <div className="flex items-center justify-between"><Label>启用</Label><Switch checked={form.enabled} onCheckedChange={(v) => setForm((f) => ({ ...f, enabled: v }))} /></div>
+            <div className="flex items-center justify-between"><Label>包含所有启用订阅</Label><Switch checked={form.include_all_subscriptions} onCheckedChange={(v) => setForm((f) => ({ ...f, include_all_subscriptions: v }))} /></div>
             {subs && subs.length > 0 && (
               <div className="space-y-2">
                 <Label>订阅源</Label>

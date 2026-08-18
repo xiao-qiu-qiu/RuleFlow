@@ -27,6 +27,8 @@ type Proxy struct {
 	Port                     int             `yaml:"port,omitempty"`
 	Version                  int             `yaml:"version,omitempty"`
 	Password                 string          `yaml:"password,omitempty"`
+	Obfs                     string          `yaml:"obfs,omitempty"`
+	ObfsPassword             string          `yaml:"obfs-password,omitempty"`
 	UDP                      bool            `yaml:"udp,omitempty"`
 	SNI                      string          `yaml:"sni,omitempty"`
 	SkipCertVerify           bool            `yaml:"skip-cert-verify,omitempty"`
@@ -338,6 +340,12 @@ func addHysteria2Fields(proxy *Proxy, opts map[string]interface{}) {
 	if password, ok := opts["password"].(string); ok {
 		proxy.Password = password
 	}
+	if obfs, ok := stringOption(opts, "obfs"); ok {
+		proxy.Obfs = obfs
+	}
+	if obfsPassword, ok := stringOption(opts, "obfs-password", "obfs_password"); ok {
+		proxy.ObfsPassword = obfsPassword
+	}
 	applyTLSFields(proxy, opts)
 }
 
@@ -471,9 +479,6 @@ func extractTLSOptions(opts map[string]interface{}) (*TLSOptions, bool) {
 				tlsObj.Enabled = enabled
 			}
 			if serverName, ok := stringOption(value, "server_name", "server-name", "sni"); ok {
-				if serverName == "" {
-					return nil, false
-				}
 				tlsObj.ServerName = serverName
 			}
 			if insecure, ok := boolOption(value, "insecure"); ok {

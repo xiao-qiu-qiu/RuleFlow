@@ -68,6 +68,7 @@ export interface ConfigPolicy {
   token: string;
   description: string;
   subscription_ids: number[];
+  include_all_subscriptions: boolean;
   node_ids: number[];
   template_name: string;
   target: string;

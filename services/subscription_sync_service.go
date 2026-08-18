@@ -117,6 +117,9 @@ func policyReferencesSubscription(policy *database.ConfigPolicy, subscriptionID 
 	if policy == nil {
 		return false
 	}
+	if policy.IncludeAllSubscriptions {
+		return true
+	}
 	for _, id := range policy.SubscriptionIDs {
 		if id == subscriptionID {
 			return true

@@ -61,6 +61,7 @@ func serializeVLESS(name, server string, port int, config map[string]interface{}
 		return "", fmt.Errorf("vless 节点缺少 uuid")
 	}
 	q := url.Values{}
+	q.Set("encryption", "none")
 	if flow := configStr(config, "flow"); flow != "" {
 		q.Set("flow", flow)
 	}
@@ -90,24 +91,22 @@ func serializeVMess(name, server string, port int, config map[string]interface{}
 
 	tlsStr := ""
 	sni := ""
-	if tls := configMap(config, "tls"); tls != nil {
-		if enabled, _ := tls["enabled"].(bool); enabled {
-			tlsStr = "tls"
-		}
-		sni = configStr(tls, "server_name")
+	if tls, ok := extractTLSOptions(config); ok && tls.Enabled {
+		tlsStr = "tls"
+		sni = tls.ServerName
 	}
 
 	network := "tcp"
 	path := ""
 	host := ""
 	serviceName := ""
-	if transport := configMap(config, "transport"); transport != nil {
-		if t := configStr(transport, "type"); t != "" {
-			network = t
+	if transport, ok := extractTransportOptions(config); ok && transport != nil {
+		if transport.Type != "" {
+			network = transport.Type
 		}
-		path = configStr(transport, "path")
-		host = configStr(transport, "host")
-		serviceName = configStr(transport, "service_name")
+		path = transport.Path
+		host = transport.Host
+		serviceName = transport.ServiceName
 	}
 
 	type vmessJSON struct {
@@ -156,13 +155,37 @@ func serializeHysteria2(name, server string, port int, config map[string]interfa
 		return "", fmt.Errorf("hysteria2 节点缺少 password")
 	}
 	q := url.Values{}
+	if obfs := configStr(config, "obfs"); obfs != "" {
+		q.Set("obfs", obfs)
+	}
+	if obfsPassword, ok := stringOption(config, "obfs-password", "obfs_password"); ok {
+		q.Set("obfs-password", obfsPassword)
+	}
+	sni := ""
+	insecure := false
+	var alpn []string
 	if tls := configMap(config, "tls"); tls != nil {
-		if sni := configStr(tls, "server_name"); sni != "" {
-			q.Set("sni", sni)
-		}
-		if insecure, _ := tls["insecure"].(bool); insecure {
-			q.Set("insecure", "1")
-		}
+		sni = configStr(tls, "server_name", "server-name", "sni")
+		insecure, _ = tls["insecure"].(bool)
+		alpn, _ = stringSliceOption(tls, "alpn")
+	}
+	if sni == "" {
+		sni = configStr(config, "sni", "server_name", "server-name")
+	}
+	if !insecure {
+		insecure, _ = boolOption(config, "skip-cert-verify", "insecure")
+	}
+	if len(alpn) == 0 {
+		alpn, _ = stringSliceOption(config, "alpn")
+	}
+	if sni != "" {
+		q.Set("sni", sni)
+	}
+	if insecure {
+		q.Set("insecure", "1")
+	}
+	if len(alpn) > 0 {
+		q.Set("alpn", strings.Join(alpn, ","))
 	}
 	raw := fmt.Sprintf("hysteria2://%s@%s:%d", url.PathEscape(password), server, port)
 	if encoded := q.Encode(); encoded != "" {
@@ -178,15 +201,11 @@ func serializeTUIC(name, server string, port int, config map[string]interface{})
 		return "", fmt.Errorf("tuic 节点缺少 uuid 或 password")
 	}
 	q := url.Values{}
-	if tls := configMap(config, "tls"); tls != nil {
-		if sni := configStr(tls, "server_name"); sni != "" {
-			q.Set("sni", sni)
-		}
-		if insecure, _ := tls["insecure"].(bool); insecure {
-			q.Set("insecure", "1")
-		}
+	applySimpleTLSParams(q, config)
+	if controller := configStr(config, "congestion-controller", "congestion_control"); controller != "" {
+		q.Set("congestion_control", controller)
 	}
-	raw := fmt.Sprintf("tuic://%s:%s@%s:%d", uuid, password, server, port)
+	raw := fmt.Sprintf("tuic://%s:%s@%s:%d", uuid, url.PathEscape(password), server, port)
 	if encoded := q.Encode(); encoded != "" {
 		raw += "?" + encoded
 	}
@@ -199,14 +218,7 @@ func serializeAnyTLS(name, server string, port int, config map[string]interface{
 		return "", fmt.Errorf("anytls 节点缺少 password")
 	}
 	q := url.Values{}
-	if tls := configMap(config, "tls"); tls != nil {
-		if sni := configStr(tls, "server_name"); sni != "" {
-			q.Set("sni", sni)
-		}
-		if insecure, _ := tls["insecure"].(bool); insecure {
-			q.Set("insecure", "1")
-		}
-	}
+	applySimpleTLSParams(q, config)
 	raw := fmt.Sprintf("anytls://%s@%s:%d", url.PathEscape(password), server, port)
 	if encoded := q.Encode(); encoded != "" {
 		raw += "?" + encoded
@@ -216,83 +228,93 @@ func serializeAnyTLS(name, server string, port int, config map[string]interface{
 
 // applyTLSParams 将 TLS 配置写入 query 参数
 func applyTLSParams(q url.Values, config map[string]interface{}) {
-	tls := configMap(config, "tls")
-	if tls == nil {
+	tls, ok := extractTLSOptions(config)
+	if !ok || tls == nil {
 		return
 	}
-	enabled, _ := tls["enabled"].(bool)
-	if !enabled {
+	if !tls.Enabled {
 		return
 	}
 
 	// 检查是否为 reality
-	if reality := configMap(tls, "reality"); reality != nil {
-		if realityEnabled, _ := reality["enabled"].(bool); realityEnabled {
-			q.Set("security", "reality")
-			if pk := configStr(reality, "public_key"); pk != "" {
-				q.Set("pbk", pk)
-			}
-			if sid := configStr(reality, "short_id"); sid != "" {
-				q.Set("sid", sid)
-			}
+	if reality := tls.Reality; reality != nil {
+		q.Set("security", "reality")
+		if reality.PublicKey != "" {
+			q.Set("pbk", reality.PublicKey)
+		}
+		if reality.ShortID != "" {
+			q.Set("sid", reality.ShortID)
 		}
 	} else {
 		q.Set("security", "tls")
 	}
 
-	if sni := configStr(tls, "server_name"); sni != "" {
-		q.Set("sni", sni)
+	if tls.ServerName != "" {
+		q.Set("sni", tls.ServerName)
 	}
-	if insecure, _ := tls["insecure"].(bool); insecure {
+	if tls.Insecure {
 		q.Set("allowInsecure", "1")
 	}
-	if alpnList, ok := tls["alpn"].([]interface{}); ok && len(alpnList) > 0 {
-		parts := make([]string, 0, len(alpnList))
-		for _, a := range alpnList {
-			if s, ok := a.(string); ok {
-				parts = append(parts, s)
-			}
-		}
-		if len(parts) > 0 {
-			q.Set("alpn", strings.Join(parts, ","))
-		}
+	if len(tls.ALPN) > 0 {
+		q.Set("alpn", strings.Join(tls.ALPN, ","))
 	}
-	if utls := configMap(tls, "utls"); utls != nil {
-		if fp := configStr(utls, "fingerprint"); fp != "" {
-			q.Set("fp", fp)
-		}
+	if tls.UTLS != nil && tls.UTLS.Fingerprint != "" {
+		q.Set("fp", tls.UTLS.Fingerprint)
+	}
+}
+
+func applySimpleTLSParams(q url.Values, config map[string]interface{}) {
+	tls, ok := extractTLSOptions(config)
+	if !ok || tls == nil {
+		return
+	}
+	if tls.ServerName != "" {
+		q.Set("sni", tls.ServerName)
+	}
+	if tls.Insecure {
+		q.Set("insecure", "1")
+	}
+	if len(tls.ALPN) > 0 {
+		q.Set("alpn", strings.Join(tls.ALPN, ","))
+	}
+	if tls.UTLS != nil && tls.UTLS.Fingerprint != "" {
+		q.Set("fp", tls.UTLS.Fingerprint)
 	}
 }
 
 // applyTransportParams 将 transport 配置写入 query 参数
 func applyTransportParams(q url.Values, config map[string]interface{}) {
-	transport := configMap(config, "transport")
-	if transport == nil {
+	transport, ok := extractTransportOptions(config)
+	if !ok || transport == nil {
 		return
 	}
-	transportType := configStr(transport, "type")
+	transportType := transport.Type
 	if transportType == "" || transportType == "tcp" {
 		return
 	}
 	q.Set("type", transportType)
-	if path := configStr(transport, "path"); path != "" {
-		q.Set("path", path)
+	if transport.Path != "" {
+		q.Set("path", transport.Path)
 	}
-	if host := configStr(transport, "host"); host != "" {
-		q.Set("host", host)
+	if transport.Host != "" {
+		q.Set("host", transport.Host)
 	}
-	if sn := configStr(transport, "service_name"); sn != "" {
-		q.Set("serviceName", sn)
+	if transport.ServiceName != "" {
+		q.Set("serviceName", transport.ServiceName)
 	}
 }
 
 // configStr 从 map 中安全提取字符串
-func configStr(m map[string]interface{}, key string) string {
+func configStr(m map[string]interface{}, keys ...string) string {
 	if m == nil {
 		return ""
 	}
-	v, _ := m[key].(string)
-	return v
+	for _, key := range keys {
+		if value, ok := m[key].(string); ok && value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // configMap 从 map 中安全提取子 map

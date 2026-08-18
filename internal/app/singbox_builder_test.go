@@ -392,6 +392,42 @@ func TestBuildSingBoxUsesNestedTLSAndTransport(t *testing.T) {
 	}
 }
 
+func TestBuildSingBoxHysteria2IncludesObfs(t *testing.T) {
+	nodes := []*ProxyNode{{
+		Protocol: "hysteria2",
+		Name:     "HY2",
+		Server:   "hy2.example.com",
+		Port:     443,
+		Options: map[string]interface{}{
+			"password":      "secret",
+			"obfs":          "salamander",
+			"obfs-password": "obfs-secret",
+			"tls": map[string]interface{}{
+				"enabled":     true,
+				"server_name": "hy2.example.com",
+			},
+		},
+	}}
+	config, err := BuildSingBoxFromTemplateContent(nodes, `{"outbounds": ["__OUTBOUNDS__"]}`)
+	if err != nil {
+		t.Fatalf("生成 sing-box 配置失败: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(config), &parsed); err != nil {
+		t.Fatalf("生成的 sing-box 配置不是合法 JSON: %v", err)
+	}
+	outbounds := parsed["outbounds"].([]interface{})
+	if len(outbounds) == 0 {
+		t.Fatal("sing-box 配置缺少 Hysteria2 outbound")
+	}
+	outbound := outbounds[0].(map[string]interface{})
+	obfs := outbound["obfs"].(map[string]interface{})
+	if obfs["type"] != "salamander" || obfs["password"] != "obfs-secret" {
+		t.Fatalf("Hysteria2 obfs 输出错误: %#v", obfs)
+	}
+}
+
 func TestBuildSingBoxWireGuard(t *testing.T) {
 	nodes := []*ProxyNode{
 		{

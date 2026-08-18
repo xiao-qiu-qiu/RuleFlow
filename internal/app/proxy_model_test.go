@@ -39,6 +39,26 @@ func TestVLESSRealityYAMLOutput(t *testing.T) {
 	}
 }
 
+func TestHysteria2ObfsRoundTrip(t *testing.T) {
+	node, err := parseHysteria2Node("hysteria2://secret@example.com:443?sni=edge.example.com&obfs=salamander&obfs-password=obfs-secret#hy2")
+	if err != nil {
+		t.Fatalf("parseHysteria2Node() error = %v", err)
+	}
+
+	proxies, _ := buildProxies([]*ProxyNode{node})
+	if len(proxies) != 1 || proxies[0].Obfs != "salamander" || proxies[0].ObfsPassword != "obfs-secret" {
+		t.Fatalf("Hysteria2 obfs 字段未保留: %#v", proxies)
+	}
+
+	link, err := SerializeNodeURL(node.Name, node.Protocol, node.Server, node.Port, node.Options)
+	if err != nil {
+		t.Fatalf("SerializeNodeURL() error = %v", err)
+	}
+	if !strings.Contains(link, "obfs=salamander") || !strings.Contains(link, "obfs-password=obfs-secret") {
+		t.Fatalf("序列化链接缺少 obfs 参数: %s", link)
+	}
+}
+
 func TestAddVLESSFieldsFromNestedTLS(t *testing.T) {
 	proxy := &Proxy{Name: "东京", Type: "vless", Server: "154.31.116.16", Port: 45478, UDP: true}
 	opts := map[string]interface{}{

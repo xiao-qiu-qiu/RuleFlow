@@ -8,14 +8,14 @@ import (
 	"github.com/ablate-ai/RuleFlow/services"
 )
 
-
 // BackupHandlers 备份相关接口
 type BackupHandlers struct {
-	svc *services.BackupService
+	svc         *services.BackupService
+	policyCache policyConfigCache
 }
 
-func NewBackupHandlers(svc *services.BackupService) *BackupHandlers {
-	return &BackupHandlers{svc: svc}
+func NewBackupHandlers(svc *services.BackupService, policyCache policyConfigCache) *BackupHandlers {
+	return &BackupHandlers{svc: svc, policyCache: policyCache}
 }
 
 // GetSettings GET /api/backup/settings
@@ -27,12 +27,12 @@ func (h *BackupHandlers) GetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	// 脱敏：隐藏 secret key
 	resp := map[string]interface{}{
-		"enabled":             settings.Enabled,
-		"r2_account_id":       settings.R2AccountID,
-		"r2_access_key_id":    settings.R2AccessKeyID,
+		"enabled":              settings.Enabled,
+		"r2_account_id":        settings.R2AccountID,
+		"r2_access_key_id":     settings.R2AccessKeyID,
 		"r2_secret_access_key": maskSecret(settings.R2SecretAccessKey),
-		"r2_bucket_name":      settings.R2BucketName,
-		"updated_at":          settings.UpdatedAt,
+		"r2_bucket_name":       settings.R2BucketName,
+		"updated_at":           settings.UpdatedAt,
 	}
 	SendSuccess(w, resp)
 }
@@ -53,10 +53,10 @@ func (h *BackupHandlers) SaveSettings(w http.ResponseWriter, r *http.Request) {
 
 	// 如果 secret 传的是脱敏占位符，保留数据库中原值
 	settings := &database.BackupSettings{
-		Enabled:      req.Enabled,
-		R2AccountID:  req.R2AccountID,
+		Enabled:       req.Enabled,
+		R2AccountID:   req.R2AccountID,
 		R2AccessKeyID: req.R2AccessKeyID,
-		R2BucketName: req.R2BucketName,
+		R2BucketName:  req.R2BucketName,
 	}
 	if req.R2SecretAccessKey != "" && req.R2SecretAccessKey != "••••••••" {
 		settings.R2SecretAccessKey = req.R2SecretAccessKey
@@ -144,6 +144,9 @@ func (h *BackupHandlers) Restore(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.RestoreFromKey(r.Context(), req.FileKey); err != nil {
 		SendError(w, http.StatusInternalServerError, "恢复失败: "+err.Error())
 		return
+	}
+	if h.policyCache != nil {
+		_ = h.policyCache.DeleteAllByPattern(r.Context(), "ruleflow:policy:config:*")
 	}
 	SendSuccess(w, map[string]bool{"restored": true})
 }

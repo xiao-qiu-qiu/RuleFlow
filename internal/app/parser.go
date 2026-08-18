@@ -389,6 +389,11 @@ func parseHysteria2Node(nodeURL string) (*ProxyNode, error) {
 	query := u.Query()
 	sni := query.Get("sni")
 	skipCertVerify := queryBool(query, "allow_insecure", "insecure")
+	obfs := strings.TrimSpace(query.Get("obfs"))
+	obfsPassword := query.Get("obfs-password")
+	if obfsPassword == "" {
+		obfsPassword = query.Get("obfs_password")
+	}
 
 	name := decodeURLFragment(u)
 	if name == "" {
@@ -401,8 +406,10 @@ func parseHysteria2Node(nodeURL string) (*ProxyNode, error) {
 		Server:   server,
 		Port:     port,
 		Options: map[string]interface{}{
-			"password": password,
-			"tls":      buildTLSOptions(true, sni, skipCertVerify, parseALPN(query), ""),
+			"password":      password,
+			"tls":           buildTLSOptions(true, sni, skipCertVerify, parseALPN(query), ""),
+			"obfs":          obfs,
+			"obfs-password": obfsPassword,
 		},
 	}, nil
 }

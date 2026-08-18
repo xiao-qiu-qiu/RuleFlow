@@ -17,8 +17,8 @@ type NodeDeleter interface {
 
 // SubscriptionService 订阅服务
 type SubscriptionService struct {
-	repo      *database.SubscriptionRepo
-	cache     *cache.SubscriptionCache
+	repo        *database.SubscriptionRepo
+	cache       *cache.SubscriptionCache
 	nodeDeleter NodeDeleter
 }
 
@@ -59,7 +59,13 @@ func (s *SubscriptionService) CreateSubscription(ctx context.Context, sub *datab
 		sub.RefreshInterval = 3600 // 默认 1 小时
 	}
 
-	return s.repo.Create(ctx, sub)
+	if err := s.repo.Create(ctx, sub); err != nil {
+		return err
+	}
+	if s.cache != nil {
+		_ = s.cache.DeleteAllByPattern(ctx, "ruleflow:policy:config:*")
+	}
+	return nil
 }
 
 // GetSubscription 获取订阅信息
@@ -124,6 +130,9 @@ func (s *SubscriptionService) DeleteSubscriptionByID(ctx context.Context, id int
 		if err != nil {
 			return fmt.Errorf("删除关联节点失败: %w", err)
 		}
+	}
+	if s.cache != nil {
+		_ = s.cache.DeleteAllByPattern(ctx, "ruleflow:policy:config:*")
 	}
 
 	return s.repo.DeleteByID(ctx, id)

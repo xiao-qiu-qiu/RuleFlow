@@ -123,7 +123,7 @@ func main() {
 	backupService := services.NewBackupService(backupRepo, db.Pool)
 	backupScheduler := services.NewBackupScheduler(backupService)
 	backupScheduler.Start(schedulerCtx)
-	backupHandlers := api.NewBackupHandlers(backupService)
+	backupHandlers := api.NewBackupHandlers(backupService, subscriptionCache)
 
 	adminUserRepo := database.NewAdminUserRepo(db)
 
@@ -283,6 +283,7 @@ func setupRoutes(cfg *config.Config, sessionSecret string, apiHandlers *api.Hand
 
 	// ── 公开接口（无需鉴权）──────────────────────────────
 	r.Get("/subscribe", apiHandlers.GenerateConfig)
+	r.Get("/universal-sub", apiHandlers.UniversalSubscription)
 	r.Get("/convert", apiHandlers.ConvertSubscription)
 	r.Get("/api/templates/public", apiHandlers.ListPublicTemplates)
 	r.Get("/api/templates/public/{id}", apiHandlers.GetPublicTemplate)
@@ -361,7 +362,7 @@ func setupRoutes(cfg *config.Config, sessionSecret string, apiHandlers *api.Hand
 		r.Put("/backup/settings", backupHandlers.SaveSettings)
 		r.Post("/backup/test", backupHandlers.TestConnection)
 		r.Post("/backup/trigger", backupHandlers.TriggerBackup)
-r.Get("/backup/r2-objects", backupHandlers.ListR2Objects)
+		r.Get("/backup/r2-objects", backupHandlers.ListR2Objects)
 		r.Post("/backup/restore", backupHandlers.Restore)
 
 		// 节点管理

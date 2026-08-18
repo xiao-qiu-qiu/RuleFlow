@@ -11,20 +11,21 @@ import (
 
 // ConfigPolicy 配置策略
 type ConfigPolicy struct {
-	ID              int64                  `json:"id"`
-	Name            string                 `json:"name"`
-	Token           string                 `json:"token"`
-	Description     string                 `json:"description"`
-	SubscriptionIDs []int64                `json:"subscription_ids"`
-	NodeIDs         []int64                `json:"node_ids"`
-	TemplateName    string                 `json:"template_name"`
-	Target          string                 `json:"target"`
-	NodeFilters     map[string]interface{} `json:"node_filters"`
-	Enabled         bool                   `json:"enabled"`
-	Tags            []string               `json:"tags"`
-	LastAccessedAt  *time.Time             `json:"last_accessed_at"`
-	CreatedAt       time.Time              `json:"created_at"`
-	UpdatedAt       time.Time              `json:"updated_at"`
+	ID                      int64                  `json:"id"`
+	Name                    string                 `json:"name"`
+	Token                   string                 `json:"token"`
+	Description             string                 `json:"description"`
+	SubscriptionIDs         []int64                `json:"subscription_ids"`
+	IncludeAllSubscriptions bool                   `json:"include_all_subscriptions"`
+	NodeIDs                 []int64                `json:"node_ids"`
+	TemplateName            string                 `json:"template_name"`
+	Target                  string                 `json:"target"`
+	NodeFilters             map[string]interface{} `json:"node_filters"`
+	Enabled                 bool                   `json:"enabled"`
+	Tags                    []string               `json:"tags"`
+	LastAccessedAt          *time.Time             `json:"last_accessed_at"`
+	CreatedAt               time.Time              `json:"created_at"`
+	UpdatedAt               time.Time              `json:"updated_at"`
 }
 
 // ConfigPolicyRepo 配置策略仓储
@@ -75,8 +76,8 @@ func (r *ConfigPolicyRepo) Create(ctx context.Context, policy *ConfigPolicy) err
 	}
 
 	query := `
-		INSERT INTO config_policies (id, name, token, description, subscription_ids, node_ids, template_name, target, node_filters, enabled, tags)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO config_policies (id, name, token, description, subscription_ids, include_all_subscriptions, node_ids, template_name, target, node_filters, enabled, tags)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING created_at, updated_at
 	`
 
@@ -86,6 +87,7 @@ func (r *ConfigPolicyRepo) Create(ctx context.Context, policy *ConfigPolicy) err
 		policy.Token,
 		policy.Description,
 		ensureInt64Slice(policy.SubscriptionIDs),
+		policy.IncludeAllSubscriptions,
 		ensureInt64Slice(policy.NodeIDs),
 		policy.TemplateName,
 		policy.Target,
@@ -112,6 +114,7 @@ func scanPolicy(scan func(...any) error) (*ConfigPolicy, error) {
 		&policy.Token,
 		&policy.Description,
 		&policy.SubscriptionIDs,
+		&policy.IncludeAllSubscriptions,
 		&policy.NodeIDs,
 		&policy.TemplateName,
 		&policy.Target,
@@ -136,7 +139,7 @@ func scanPolicy(scan func(...any) error) (*ConfigPolicy, error) {
 }
 
 const selectPolicyFields = `
-	SELECT id, name, token, description, subscription_ids, node_ids, template_name, target, node_filters, enabled, tags, last_accessed_at, created_at, updated_at
+	SELECT id, name, token, description, subscription_ids, include_all_subscriptions, node_ids, template_name, target, node_filters, enabled, tags, last_accessed_at, created_at, updated_at
 	FROM config_policies
 `
 
@@ -205,7 +208,7 @@ func (r *ConfigPolicyRepo) Update(ctx context.Context, policy *ConfigPolicy) err
 
 	query := `
 		UPDATE config_policies
-		SET name = $2, description = $3, subscription_ids = $4, node_ids = $5, template_name = $6, target = $7, node_filters = $8, enabled = $9, tags = $10
+		SET name = $2, description = $3, subscription_ids = $4, include_all_subscriptions = $5, node_ids = $6, template_name = $7, target = $8, node_filters = $9, enabled = $10, tags = $11
 		WHERE id = $1
 		RETURNING updated_at
 	`
@@ -215,6 +218,7 @@ func (r *ConfigPolicyRepo) Update(ctx context.Context, policy *ConfigPolicy) err
 		policy.Name,
 		policy.Description,
 		ensureInt64Slice(policy.SubscriptionIDs),
+		policy.IncludeAllSubscriptions,
 		ensureInt64Slice(policy.NodeIDs),
 		policy.TemplateName,
 		policy.Target,

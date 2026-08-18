@@ -24,4 +24,9 @@ func TestPolicyReferencesSubscription(t *testing.T) {
 	if policyReferencesSubscription(nil, 1002) {
 		t.Fatalf("nil 策略不应命中")
 	}
+
+	policy.IncludeAllSubscriptions = true
+	if !policyReferencesSubscription(policy, 2001) {
+		t.Fatalf("包含所有订阅的策略应命中任意订阅")
+	}
 }

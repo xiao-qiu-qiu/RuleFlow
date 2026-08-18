@@ -26,6 +26,7 @@ const backupRetentionCount = 6
 
 // backupKeyPattern 合法备份文件名格式：ruleflow/backup-2006-01-02-15-04-05.tar.gz
 var backupKeyPattern = regexp.MustCompile(`^ruleflow/backup-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.tar\.gz$`)
+var sqlIdentifierPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
 // backupTables 备份时的导出顺序
 var backupTables = []string{
@@ -71,7 +72,6 @@ func (s *BackupService) GetSettings(ctx context.Context) (*database.BackupSettin
 func (s *BackupService) SaveSettings(ctx context.Context, settings *database.BackupSettings) error {
 	return s.repo.SaveSettings(ctx, settings)
 }
-
 
 func (s *BackupService) newS3Client(settings *database.BackupSettings) *s3.Client {
 	endpoint := fmt.Sprintf("https://%s.r2.cloudflarestorage.com", settings.R2AccountID)
@@ -335,7 +335,12 @@ func (s *BackupService) RestoreFromKey(ctx context.Context, fileKey string) erro
 		if !ok || len(csvData) == 0 {
 			continue
 		}
-		copySQL := fmt.Sprintf("COPY %s FROM STDIN WITH (FORMAT CSV, HEADER true)", table)
+		columns, err := csvColumnList(csvData)
+		if err != nil {
+			_ = pgExec(ctx, pgConn, "ROLLBACK")
+			return fmt.Errorf("读取表 %s 的备份列失败: %w", table, err)
+		}
+		copySQL := fmt.Sprintf("COPY %s (%s) FROM STDIN WITH (FORMAT CSV, HEADER true)", table, columns)
 		if _, err := pgConn.CopyFrom(ctx, bytes.NewReader(csvData), copySQL); err != nil {
 			_ = pgExec(ctx, pgConn, "ROLLBACK")
 			return fmt.Errorf("恢复表 %s 失败: %w", table, err)
@@ -348,6 +353,31 @@ func (s *BackupService) RestoreFromKey(ctx context.Context, fileKey string) erro
 
 	log.Printf("[backup] 从 %s 恢复完成", fileKey)
 	return nil
+}
+
+func csvColumnList(csvData []byte) (string, error) {
+	headers, err := csv.NewReader(bytes.NewReader(csvData)).Read()
+	if err != nil {
+		return "", err
+	}
+	if len(headers) == 0 {
+		return "", fmt.Errorf("CSV 表头为空")
+	}
+
+	columns := make([]string, 0, len(headers))
+	seen := make(map[string]struct{}, len(headers))
+	for _, raw := range headers {
+		name := strings.TrimSpace(raw)
+		if !sqlIdentifierPattern.MatchString(name) {
+			return "", fmt.Errorf("非法列名: %q", raw)
+		}
+		if _, exists := seen[name]; exists {
+			return "", fmt.Errorf("重复列名: %q", name)
+		}
+		seen[name] = struct{}{}
+		columns = append(columns, `"`+name+`"`)
+	}
+	return strings.Join(columns, ", "), nil
 }
 
 // extractArchive 解压 tar.gz，返回 filename→content 映射
