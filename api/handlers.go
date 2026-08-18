@@ -1,10 +1,11 @@
 package api
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -1256,16 +1257,23 @@ func (h *Handlers) GenerateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 优先从 Redis 缓存读取
-	if h.policyCache != nil {
+	// 自适应策略的输出取决于 User-Agent/target，不能按原 token 共用缓存。
+	target, v2rayOutput, adaptive, err := policyTargetForRequest(policy.Target, r)
+	if err != nil {
+		h.recordConfigAccess(r, policy, token, http.StatusInternalServerError, false, false, nil, "配置策略目标类型无效: "+err.Error())
+		http.Error(w, "配置策略目标类型无效: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 优先从 Redis 缓存读取固定目标策略。
+	if h.policyCache != nil && !adaptive {
 		if cached, err := h.policyCache.GetPolicyConfig(ctx, token); err == nil && cached != "" {
-			switch policy.Target {
-			case "surge":
+			if target == "surge" {
 				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 				cached = finalizeConfigContent(r, "surge", cached)
-			case "sing-box":
+			} else if target == "sing-box" {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			default:
+			} else {
 				w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 			}
 			w.Header().Set("X-Cache", "HIT")
@@ -1318,13 +1326,6 @@ func (h *Handlers) GenerateConfig(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// 生成配置，规范化 target（兼容数据库中旧的 clash-meta 等值）
-	target, err := resolveConfigTarget(policy.Target, "clash-mihomo")
-	if err != nil {
-		h.recordConfigAccess(r, policy, token, http.StatusInternalServerError, false, false, nil, "配置策略目标类型无效: "+err.Error())
-		http.Error(w, "配置策略目标类型无效: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
 	configContent, err := buildConfigContent(r, proxyNodes, templateContent, target)
 	if err != nil {
 		h.recordConfigAccess(r, policy, token, http.StatusInternalServerError, false, false, nil, "生成配置失败: "+err.Error())
@@ -1332,9 +1333,29 @@ func (h *Handlers) GenerateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 写入 Redis 缓存
-	if h.policyCache != nil {
+	// 写入 Redis 缓存。自适应策略按请求即时生成，避免不同客户端相互污染。
+	if h.policyCache != nil && !adaptive {
 		_ = h.policyCache.SetPolicyConfig(ctx, token, configContent)
+	}
+
+	if v2rayOutput {
+		encoded, count, err := buildV2RaySubscription(configContent)
+		if err != nil {
+			h.recordConfigAccess(r, policy, token, http.StatusBadGateway, false, false, nil, "生成 V2Ray 订阅失败: "+err.Error())
+			http.Error(w, "生成 V2Ray 订阅失败: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", `inline; filename="v2rayn-sub.txt"`)
+		w.Header().Set("X-Subscription-Node-Count", fmt.Sprintf("%d", count))
+		w.Header().Set("X-Universal-Target", "v2ray")
+		w.Header().Set("X-Cache", "MISS")
+		if userInfo := h.configPolicyService.GetUserInfoForPolicy(ctx, policy); userInfo != nil {
+			w.Header().Set("Subscription-Userinfo", formatUserInfo(userInfo))
+		}
+		h.recordConfigAccess(r, policy, token, http.StatusOK, true, false, &count, "")
+		_, _ = io.WriteString(w, encoded+"\n")
+		return
 	}
 
 	applyConfigResponseHeaders(w, target, len(proxyNodes))
@@ -1760,7 +1781,6 @@ type ExportPayload struct {
 	ConfigPolicies []*database.ConfigPolicy `json:"config_policies"`
 	RuleSources    []database.RuleSource    `json:"rule_sources"`
 }
-
 
 // ExportData 导出所有数据为 JSON 文件
 func (h *Handlers) ExportData(w http.ResponseWriter, r *http.Request) {

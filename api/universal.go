@@ -14,11 +14,14 @@ import (
 )
 
 var universalSubscriptionTargets = map[string]struct{}{
-	"mihomo":   {},
-	"stash":    {},
-	"surge":    {},
-	"sing-box": {},
-	"v2ray":    {},
+	"mihomo":       {},
+	"clash":        {},
+	"clash-meta":   {},
+	"clash-mihomo": {},
+	"stash":        {},
+	"surge":        {},
+	"sing-box":     {},
+	"v2ray":        {},
 }
 
 // UniversalSubscription 根据客户端类型返回对应的订阅格式。
@@ -31,11 +34,22 @@ func (h *Handlers) UniversalSubscription(w http.ResponseWriter, r *http.Request)
 	}
 
 	target := universalTargetForRequest(r)
-	policyTarget := target
-	if target == "v2ray" {
-		policyTarget = "mihomo"
+	policyToken := clientToken
+	// 新版自适应策略直接使用原 token。旧版通用订阅曾为每种格式派生
+	// __auto_* token，保留回退逻辑以免升级后旧链接立即失效。
+	if h.configPolicyService == nil {
+		policyTarget := target
+		if policyTarget == "v2ray" {
+			policyTarget = "mihomo"
+		}
+		policyToken = derivedPolicyToken(clientToken, policyTarget)
+	} else if _, err := h.configPolicyService.GetByToken(r.Context(), clientToken); err != nil {
+		policyTarget := target
+		if policyTarget == "v2ray" {
+			policyTarget = "mihomo"
+		}
+		policyToken = derivedPolicyToken(clientToken, policyTarget)
 	}
-	policyToken := derivedPolicyToken(clientToken, policyTarget)
 
 	// 直接调用现有策略生成器，保留缓存、模板、规则和访问日志行为。
 	requestCopy := r.Clone(r.Context())
@@ -59,7 +73,8 @@ func (h *Handlers) UniversalSubscription(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if target != "v2ray" {
+	// 自适应策略在 GenerateConfig 内已经完成 V2Ray Base64 转换，避免重复解析。
+	if target != "v2ray" || response.Header.Get("X-Universal-Target") == "v2ray" {
 		copyUniversalHeaders(w.Header(), response.Header)
 		w.Header().Set("X-Universal-Target", target)
 		w.WriteHeader(response.StatusCode)
@@ -87,6 +102,10 @@ func (h *Handlers) UniversalSubscription(w http.ResponseWriter, r *http.Request)
 func universalTargetForRequest(r *http.Request) string {
 	if target := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("target"))); target != "" {
 		if _, ok := universalSubscriptionTargets[target]; ok {
+			switch target {
+			case "clash", "clash-meta", "clash-mihomo":
+				return "mihomo"
+			}
 			return target
 		}
 	}
@@ -104,6 +123,25 @@ func universalTargetForRequest(r *http.Request) string {
 	default:
 		return "mihomo"
 	}
+}
+
+// policyTargetForRequest resolves a policy target for this request. Adaptive
+// policies vary by User-Agent, while the regular targets remain deterministic.
+// V2Ray uses the Mihomo intermediate representation before URL conversion.
+func policyTargetForRequest(policyTarget string, r *http.Request) (target string, v2ray bool, adaptive bool, err error) {
+	if strings.EqualFold(strings.TrimSpace(policyTarget), "adaptive") {
+		adaptive = true
+		target = universalTargetForRequest(r)
+		if target == "v2ray" {
+			return "clash-mihomo", true, true, nil
+		}
+		if target == "mihomo" {
+			return "clash-mihomo", false, true, nil
+		}
+		return target, false, true, nil
+	}
+	target, err = resolveConfigTarget(policyTarget, "clash-mihomo")
+	return target, false, false, err
 }
 
 func derivedPolicyToken(clientToken, target string) string {

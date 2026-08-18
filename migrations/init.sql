@@ -114,8 +114,8 @@ CREATE TABLE IF NOT EXISTS config_policies (
     last_accessed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT config_policies_target_check
-        CHECK (target IN ('clash-mihomo', 'stash', 'surge', 'sing-box'))
+	CONSTRAINT config_policies_target_check
+	        CHECK (target IN ('clash-mihomo', 'stash', 'surge', 'sing-box', 'adaptive'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_config_policies_name ON config_policies(name);

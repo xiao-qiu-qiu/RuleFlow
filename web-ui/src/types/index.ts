@@ -62,6 +62,19 @@ export interface NodeStats {
   by_source: Record<string, number>;
 }
 
+export type ConfigTarget = "clash-mihomo" | "stash" | "surge" | "sing-box" | "adaptive";
+
+export interface ConfigPolicyForm {
+  name: string;
+  description: string;
+  target: ConfigTarget;
+  template_name: string;
+  enabled: boolean;
+  include_all_subscriptions: boolean;
+  subscription_ids: number[];
+  node_ids: number[];
+}
+
 export interface ConfigPolicy {
   id: number;
   name: string;
@@ -71,7 +84,7 @@ export interface ConfigPolicy {
   include_all_subscriptions: boolean;
   node_ids: number[];
   template_name: string;
-  target: string;
+  target: ConfigTarget;
   node_filters: Record<string, unknown>;
   enabled: boolean;
   tags: string[];

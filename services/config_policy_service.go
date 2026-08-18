@@ -40,7 +40,7 @@ func (s *ConfigPolicyService) Create(ctx context.Context, policy *database.Confi
 	}
 
 	// 验证目标类型
-	if policy.Target != "clash-mihomo" && policy.Target != "stash" && policy.Target != "surge" && policy.Target != "sing-box" {
+	if !isSupportedConfigTarget(policy.Target) {
 		return fmt.Errorf("不支持的目标类型: %s", policy.Target)
 	}
 
@@ -75,7 +75,7 @@ func (s *ConfigPolicyService) Update(ctx context.Context, policy *database.Confi
 	}
 
 	// 验证目标类型
-	if policy.Target != "clash-mihomo" && policy.Target != "stash" && policy.Target != "surge" && policy.Target != "sing-box" {
+	if !isSupportedConfigTarget(policy.Target) {
 		return fmt.Errorf("不支持的目标类型: %s", policy.Target)
 	}
 
@@ -144,11 +144,20 @@ func (s *ConfigPolicyService) ValidateConfig(policy *database.ConfigPolicy) erro
 	}
 
 	// 验证目标类型
-	if policy.Target != "clash-mihomo" && policy.Target != "stash" && policy.Target != "surge" && policy.Target != "sing-box" {
-		return fmt.Errorf("不支持的目标类型: %s (支持: clash-mihomo, stash, surge, sing-box)", policy.Target)
+	if !isSupportedConfigTarget(policy.Target) {
+		return fmt.Errorf("不支持的目标类型: %s (支持: clash-mihomo, stash, surge, sing-box, adaptive)", policy.Target)
 	}
 
 	return nil
+}
+
+func isSupportedConfigTarget(target string) bool {
+	switch target {
+	case "clash-mihomo", "stash", "surge", "sing-box", "adaptive":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *ConfigPolicyService) sanitizePolicyReferences(ctx context.Context, policy *database.ConfigPolicy) {

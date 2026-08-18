@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { get, post, put, del } from "@/lib/api";
-import type { ConfigPolicy, Subscription, Template, Node } from "@/types";
+import type { ConfigPolicy, ConfigPolicyForm, ConfigTarget, Subscription, Template, Node } from "@/types";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,14 +16,23 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Pencil, Trash2, Copy, RefreshCw, Loader2, Shield, Link2 } from "lucide-react";
 
-const TARGETS = [
+const TARGETS: Array<{ label: string; value: ConfigTarget }> = [
   { label: "Clash Mihomo", value: "clash-mihomo" },
   { label: "Stash", value: "stash" },
   { label: "Surge", value: "surge" },
   { label: "Sing-Box", value: "sing-box" },
+  { label: "自适应", value: "adaptive" },
 ];
 
-const emptyForm = { name: "", description: "", target: "clash-mihomo", template_name: "", enabled: true, include_all_subscriptions: false, subscription_ids: [] as number[], node_ids: [] as number[] };
+const emptyForm: ConfigPolicyForm = { name: "", description: "", target: "clash-mihomo", template_name: "", enabled: true, include_all_subscriptions: false, subscription_ids: [], node_ids: [] };
+
+function targetLabel(target: ConfigTarget): string {
+  return TARGETS.find((item) => item.value === target)?.label ?? target;
+}
+
+function isConfigTarget(value: string): value is ConfigTarget {
+  return TARGETS.some((item) => item.value === value);
+}
 
 export default function ConfigsPage() {
   const qc = useQueryClient();
@@ -40,7 +49,7 @@ export default function ConfigsPage() {
   const manualNodes = nodes?.filter((n) => !n.source_id) ?? [];
 
   const saveMut = useMutation({
-    mutationFn: (data: typeof form) =>
+    mutationFn: (data: ConfigPolicyForm) =>
       editId ? put(`/api/config-policies/${editId}`, data) : post("/api/config-policies", data),
     onSuccess: () => {
       toast.success(editId ? "已更新" : "已创建");
@@ -130,7 +139,7 @@ export default function ConfigsPage() {
                     {p.description && <p className="text-xs text-muted-foreground mt-1">{p.description}</p>}
                   </div>
                   <div className="flex gap-1.5 shrink-0">
-                    <Badge variant="outline">{p.target}</Badge>
+                    <Badge variant="outline">{targetLabel(p.target)}</Badge>
                     <Badge variant={p.enabled ? "default" : "secondary"}>{p.enabled ? "启用" : "禁用"}</Badge>
                   </div>
                 </div>
@@ -163,7 +172,7 @@ export default function ConfigsPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>目标格式</Label>
-                <Select value={form.target} onValueChange={(v) => setForm((f) => ({ ...f, target: v }))}>
+                <Select value={form.target} onValueChange={(v) => { if (isConfigTarget(v)) setForm((f) => ({ ...f, target: v })); }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>{TARGETS.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
                 </Select>
