@@ -21,7 +21,7 @@ const TARGETS: Array<{ label: string; value: ConfigTarget }> = [
   { label: "Stash", value: "stash" },
   { label: "Surge", value: "surge" },
   { label: "Sing-Box", value: "sing-box" },
-  { label: "自适应", value: "adaptive" },
+  { label: "adaptive", value: "adaptive" },
 ];
 
 const emptyForm: ConfigPolicyForm = { name: "", description: "", target: "clash-mihomo", template_name: "", enabled: true, include_all_subscriptions: false, subscription_ids: [], node_ids: [] };
@@ -80,8 +80,9 @@ export default function ConfigsPage() {
     setDialogOpen(true);
   }
 
-  async function copySubscribeUrl(token: string) {
-    const url = `${window.location.origin}/subscribe?token=${token}`;
+  async function copySubscribeUrl(token: string, target: ConfigTarget) {
+    const path = target === "adaptive" ? "/universal-sub" : "/subscribe";
+    const url = `${window.location.origin}${path}?token=${token}`;
     await navigator.clipboard.writeText(url);
     toast.success("订阅 URL 已复制");
   }
@@ -150,8 +151,8 @@ export default function ConfigsPage() {
                 </div>
                 <div className="flex items-center gap-1.5 text-xs bg-muted rounded-md px-2 py-1.5">
                   <Link2 className="size-3 text-muted-foreground shrink-0" />
-                  <code className="truncate text-[10px]">/subscribe?token={p.token}</code>
-                  <Button variant="ghost" size="sm" className="h-5 px-1 ml-auto" onClick={() => copySubscribeUrl(p.token)}><Copy className="size-3" /></Button>
+                  <code className="truncate text-[10px]">{p.target === "adaptive" ? "/universal-sub" : "/subscribe"}?token={p.token}</code>
+                  <Button variant="ghost" size="sm" className="h-5 px-1 ml-auto" onClick={() => copySubscribeUrl(p.token, p.target)}><Copy className="size-3" /></Button>
                 </div>
                 <div className="flex gap-1.5 pt-1">
                   <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => openEdit(p)}><Pencil className="size-3 mr-1" /> 编辑</Button>
