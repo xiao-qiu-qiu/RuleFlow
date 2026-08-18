@@ -1301,10 +1301,17 @@ func (h *Handlers) GenerateConfig(w http.ResponseWriter, r *http.Request) {
 
 	// 获取模板内容
 	var templateContent string
+	templateTarget := ""
 	if policy.TemplateName != "" {
 		if tpl, err := h.templateService.GetTemplateByName(ctx, policy.TemplateName); err == nil {
 			templateContent = tpl.Content
+			templateTarget = tpl.Target
 		}
+	}
+	if adaptive && templateContent != "" && !isAdaptiveTemplateCompatible(templateTarget, target) {
+		// 自适应策略不能把 Clash YAML/Surge INI 等格式直接套到另一种客户端。
+		// 清空后由对应目标的内置模板生成，避免跨格式解析失败。
+		templateContent = ""
 	}
 
 	// 将数据库节点转换为 ProxyNode
@@ -1485,6 +1492,18 @@ func buildConfigContent(r *http.Request, proxyNodes []*app.ProxyNode, templateCo
 		}
 		return replaceTemplateRuntimePlaceholders(r, configContent), nil
 	}
+}
+
+func isAdaptiveTemplateCompatible(templateTarget, target string) bool {
+	normalizedTemplateTarget, err := resolveConfigTarget(templateTarget, "")
+	if err != nil {
+		return false
+	}
+	if normalizedTemplateTarget == target {
+		return true
+	}
+	// Stash 兼容 Clash Mihomo 的 YAML 模板适配路径。
+	return target == "stash" && normalizedTemplateTarget == "clash-mihomo"
 }
 
 func writeConfigResponse(w http.ResponseWriter, r *http.Request, target, configContent string, nodeCount int) {

@@ -45,3 +45,18 @@ func TestResolveConfigTargetForTemplateValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestAdaptiveTemplateCompatibility(t *testing.T) {
+	if !isAdaptiveTemplateCompatible("clash-mihomo", "clash-mihomo") {
+		t.Fatal("同目标模板应保持兼容")
+	}
+	if !isAdaptiveTemplateCompatible("clash-mihomo", "stash") {
+		t.Fatal("Stash 应兼容 Clash YAML 模板")
+	}
+	if isAdaptiveTemplateCompatible("clash-mihomo", "sing-box") {
+		t.Fatal("Sing-Box 不应直接使用 Clash YAML 模板")
+	}
+	if isAdaptiveTemplateCompatible("clash-mihomo", "surge") {
+		t.Fatal("Surge 不应直接使用 Clash YAML 模板")
+	}
+}
