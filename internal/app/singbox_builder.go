@@ -8,8 +8,48 @@ import (
 )
 
 func BuildSingBoxFromDefaultTemplate(nodes []*ProxyNode) (string, error) {
-	return "", fmt.Errorf("sing-box 默认模板已移除，请在配置策略中指定模板")
+	return BuildSingBoxFromTemplateContent(nodes, defaultSingBoxTemplate)
 }
+
+// defaultSingBoxTemplate keeps adaptive policies usable when their selected
+// template belongs to another client format.
+const defaultSingBoxTemplate = `{
+  "log": {
+    "level": "warn"
+  },
+  "dns": {
+    "servers": [
+      {
+        "tag": "dns_direct",
+        "address": "local"
+      },
+      {
+        "tag": "dns_proxy",
+        "address": "https://1.1.1.1/dns-query",
+        "detour": "PROXY"
+      }
+    ],
+    "final": "dns_proxy",
+    "strategy": "prefer_ipv4"
+  },
+  "outbounds": [
+    {
+      "type": "selector",
+      "tag": "PROXY",
+      "outbounds": ["__NODES__", "DIRECT"],
+      "default": "DIRECT"
+    },
+    "__OUTBOUNDS__",
+    {
+      "type": "direct",
+      "tag": "DIRECT"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "final": "PROXY"
+  }
+}`
 
 func BuildSingBoxFromTemplateContent(nodes []*ProxyNode, templateContent string) (string, error) {
 	nodeOutbounds, nodeEndpoints, nodeNames := buildSingBoxOutbounds(nodes)

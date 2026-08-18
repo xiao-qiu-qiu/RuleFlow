@@ -109,6 +109,37 @@ func TestBuildSingBoxFromTemplateContent(t *testing.T) {
 	}
 }
 
+func TestBuildSingBoxFromDefaultTemplate(t *testing.T) {
+	nodes := []*ProxyNode{{
+		Protocol: "vless",
+		Name:     "US Node",
+		Server:   "us1.example.com",
+		Port:     443,
+		Options: map[string]interface{}{
+			"uuid": "11111111-1111-1111-1111-111111111111",
+		},
+	}}
+
+	config, err := BuildSingBoxFromDefaultTemplate(nodes)
+	if err != nil {
+		t.Fatalf("生成 sing-box 默认配置失败: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(config), &parsed); err != nil {
+		t.Fatalf("默认 sing-box 配置不是合法 JSON: %v", err)
+	}
+	if _, ok := parsed["dns"]; !ok {
+		t.Fatal("默认 sing-box 配置缺少 dns")
+	}
+	if _, ok := parsed["outbounds"]; !ok {
+		t.Fatal("默认 sing-box 配置缺少 outbounds")
+	}
+	if strings.Contains(config, "__NODES__") || strings.Contains(config, "__OUTBOUNDS__") {
+		t.Fatalf("默认 sing-box 配置残留占位符: %s", config)
+	}
+}
+
 func TestBuildSingBoxSupportsFilterExpansion(t *testing.T) {
 	templateContent := `{
   "outbounds": [
