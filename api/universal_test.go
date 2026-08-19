@@ -17,9 +17,11 @@ func TestUniversalTargetForRequest(t *testing.T) {
 	}{
 		{name: "mihomo default", want: "mihomo"},
 		{name: "v2rayn ua", userAgent: "v2rayN/7.0", want: "v2ray"},
+		{name: "v2box ua", userAgent: "V2Box/1.0 (iOS)", want: "v2ray"},
 		{name: "sing box ua", userAgent: "hiddify/2.0", want: "sing-box"},
 		{name: "explicit target", target: "surge", userAgent: "v2rayN", want: "surge"},
 		{name: "explicit clash alias", target: "clash-mihomo", userAgent: "v2rayN", want: "mihomo"},
+		{name: "explicit v2box alias", target: "v2box", userAgent: "clash.meta", want: "v2ray"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

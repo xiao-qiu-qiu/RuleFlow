@@ -22,6 +22,7 @@ var universalSubscriptionTargets = map[string]struct{}{
 	"surge":        {},
 	"sing-box":     {},
 	"v2ray":        {},
+	"v2box":        {},
 }
 
 // UniversalSubscription 根据客户端类型返回对应的订阅格式。
@@ -105,6 +106,8 @@ func universalTargetForRequest(r *http.Request) string {
 			switch target {
 			case "clash", "clash-meta", "clash-mihomo":
 				return "mihomo"
+			case "v2box":
+				return "v2ray"
 			}
 			return target
 		}
@@ -112,7 +115,7 @@ func universalTargetForRequest(r *http.Request) string {
 
 	userAgent := strings.ToLower(r.UserAgent())
 	switch {
-	case strings.Contains(userAgent, "v2rayn"), strings.Contains(userAgent, "v2ray"):
+	case strings.Contains(userAgent, "v2box"), strings.Contains(userAgent, "v2rayn"), strings.Contains(userAgent, "v2ray"):
 		return "v2ray"
 	case strings.Contains(userAgent, "sing-box"), strings.Contains(userAgent, "singbox"), strings.Contains(userAgent, "hiddify"):
 		return "sing-box"
