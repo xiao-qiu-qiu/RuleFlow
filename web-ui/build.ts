@@ -34,8 +34,9 @@ if (!result.success) {
 
 // Find the entry JS file
 const entryFile = result.outputs.find((o) => o.kind === "entry-point");
-const jsPath = entryFile
-  ? "/" + entryFile.path.split("/dist/")[1]
+const entryPath = entryFile?.path.replaceAll("\\", "/");
+const jsPath = entryPath
+  ? "/" + (entryPath.split("/dist/").pop() ?? "assets/main.js")
   : "/assets/main.js";
 
 // Build Tailwind CSS
