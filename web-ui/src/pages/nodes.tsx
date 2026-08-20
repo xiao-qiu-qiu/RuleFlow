@@ -163,9 +163,9 @@ export default function NodesPage() {
     onError: (e: Error) => toast.error(`保存节点顺序失败：${e.message}`),
   });
 
-  function handleDrop(targetId: number) {
-    if (draggingId === null || draggingId === targetId || sortMode !== "custom" || !nodes) return;
-    const from = nodes.findIndex((node) => node.id === draggingId);
+  function handleDrop(targetId: number, sourceId = draggingId) {
+    if (sourceId === null || sourceId === targetId || sortMode !== "custom" || !nodes) return;
+    const from = nodes.findIndex((node) => node.id === sourceId);
     const to = nodes.findIndex((node) => node.id === targetId);
     if (from < 0 || to < 0) return;
     const next = [...nodes];
@@ -328,7 +328,12 @@ export default function NodesPage() {
                     event.preventDefault();
                     event.dataTransfer.dropEffect = "move";
                   }}
-                  onDrop={() => handleDrop(node.id)}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const rawSourceId = event.dataTransfer.getData("text/plain");
+                    const sourceId = rawSourceId ? Number(rawSourceId) : draggingId;
+                    handleDrop(node.id, Number.isFinite(sourceId) ? sourceId : draggingId);
+                  }}
                   className={draggingId === node.id ? "opacity-50" : undefined}
                 >
                   <TableCell><Checkbox checked={selected.has(node.id)} onCheckedChange={() => toggleSelect(node.id)} /></TableCell>
