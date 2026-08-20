@@ -101,6 +101,14 @@ func (s *NodeService) BatchEnable(ctx context.Context, ids []int64, enabled bool
 	return s.repo.BatchUpdateEnabled(ctx, ids, enabled)
 }
 
+// UpdateNodeOrder 保存节点的全局展示及订阅输出顺序。
+func (s *NodeService) UpdateNodeOrder(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return fmt.Errorf("节点顺序不能为空")
+	}
+	return s.repo.UpdateOrder(ctx, ids)
+}
+
 // GetNodesBySubscription 获取指定订阅的所有节点
 func (s *NodeService) GetNodesBySubscription(ctx context.Context, subscriptionName string) ([]database.Node, error) {
 	nodes, err := s.repo.List(ctx, database.NodeFilter{})

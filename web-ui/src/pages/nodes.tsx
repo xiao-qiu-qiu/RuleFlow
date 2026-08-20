@@ -4,7 +4,7 @@ import { get, post, put, del, patch } from "@/lib/api";
 import type { Node, NodeStats } from "@/types";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,9 +15,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Trash2, Pencil, Upload, Copy, Loader2, Server, CheckSquare, XSquare } from "lucide-react";
+import { Plus, Trash2, Pencil, Upload, Copy, Loader2, Server, CheckSquare, XSquare, GripVertical } from "lucide-react";
 
-type SortMode = "default" | "egress" | "name" | "server" | "protocol";
+type SortMode = "custom" | "default" | "egress" | "name" | "server" | "protocol";
 
 function egressGroup(name: string): string {
   const trimmed = name.trim();
@@ -42,7 +42,7 @@ export default function NodesPage() {
   const [sortMode, setSortMode] = useState<SortMode>(() => {
     if (typeof window === "undefined") return "egress";
     const stored = window.localStorage.getItem("ruleflow-node-sort");
-    return stored === "default" || stored === "egress" || stored === "name" || stored === "server" || stored === "protocol" ? stored : "egress";
+    return stored === "custom" || stored === "default" || stored === "egress" || stored === "name" || stored === "server" || stored === "protocol" ? stored : "egress";
   });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -50,6 +50,7 @@ export default function NodesPage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [importText, setImportText] = useState("");
+  const [draggingId, setDraggingId] = useState<number | null>(null);
   const [form, setForm] = useState({ name: "", protocol: "trojan", server: "", port: 443, config: "{}", enabled: true, tags: "" });
 
   const { data: nodes, isLoading } = useQuery({
@@ -73,7 +74,7 @@ export default function NodesPage() {
       return true;
     });
 
-    if (sortMode === "default") return result;
+    if (sortMode === "custom" || sortMode === "default") return result;
     const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
     return result
       .map((node, index) => ({ node, index }))
@@ -151,6 +152,29 @@ export default function NodesPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // The server owns the canonical node order. The endpoint is intentionally
+  // separate from node editing so reordering does not touch credentials.
+  const reorderMut = useMutation({
+    mutationFn: (ids: number[]) => patch("/api/nodes/order", { ids }),
+    onSuccess: () => {
+      toast.success("节点顺序已保存");
+      qc.invalidateQueries({ queryKey: ["nodes"] });
+    },
+    onError: (e: Error) => toast.error(`保存节点顺序失败：${e.message}`),
+  });
+
+  function handleDrop(targetId: number) {
+    if (draggingId === null || draggingId === targetId || sortMode !== "custom" || !nodes) return;
+    const from = nodes.findIndex((node) => node.id === draggingId);
+    const to = nodes.findIndex((node) => node.id === targetId);
+    if (from < 0 || to < 0) return;
+    const next = [...nodes];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setDraggingId(null);
+    reorderMut.mutate(next.map((node) => node.id));
+  }
+
   function openCreate() {
     setEditId(null);
     setForm({ name: "", protocol: "trojan", server: "", port: 443, config: "{}", enabled: true, tags: "" });
@@ -178,7 +202,12 @@ export default function NodesPage() {
   }
 
   function toggleSelect(id: number) {
-    setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   function toggleAll() {
@@ -250,6 +279,7 @@ export default function NodesPage() {
         <Select value={sortMode} onValueChange={changeSortMode}>
           <SelectTrigger className="w-44"><SelectValue placeholder="排序" /></SelectTrigger>
           <SelectContent>
+            <SelectItem value="custom">自定义顺序（可拖动）</SelectItem>
             <SelectItem value="egress">自定义：按出口分组</SelectItem>
             <SelectItem value="default">默认顺序</SelectItem>
             <SelectItem value="name">名称排序</SelectItem>
@@ -280,6 +310,7 @@ export default function NodesPage() {
             <TableHeader className="sticky top-0 z-10 bg-card">
               <TableRow>
                 <TableHead className="w-10"><Checkbox checked={selected.size === filtered.length && filtered.length > 0} onCheckedChange={toggleAll} /></TableHead>
+                <TableHead className="w-10" aria-label="排序" />
                 <TableHead>名称</TableHead>
                 <TableHead>协议</TableHead>
                 <TableHead>服务器</TableHead>
@@ -290,8 +321,28 @@ export default function NodesPage() {
             </TableHeader>
             <TableBody>
               {filtered.map((node) => (
-                <TableRow key={node.id}>
+                <TableRow
+                  key={node.id}
+                  onDragOver={(event) => { if (sortMode === "custom") event.preventDefault(); }}
+                  onDrop={() => handleDrop(node.id)}
+                  className={draggingId === node.id ? "opacity-50" : undefined}
+                >
                   <TableCell><Checkbox checked={selected.has(node.id)} onCheckedChange={() => toggleSelect(node.id)} /></TableCell>
+                  <TableCell className="px-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      draggable={sortMode === "custom"}
+                      disabled={sortMode !== "custom" || reorderMut.isPending}
+                      title={sortMode === "custom" ? "拖动调整顺序" : "切换到自定义顺序后可拖动"}
+                      aria-label="拖动调整顺序"
+                      onDragStart={(event) => { setDraggingId(node.id); event.dataTransfer.effectAllowed = "move"; }}
+                      onDragEnd={() => setDraggingId(null)}
+                    >
+                      <GripVertical className="size-4 text-muted-foreground" />
+                    </Button>
+                  </TableCell>
                   <TableCell className="font-medium max-w-[200px] truncate">{node.name}</TableCell>
                   <TableCell><Badge variant="outline">{node.protocol}</Badge></TableCell>
                   <TableCell className="text-muted-foreground text-sm">{node.server}:{node.port}</TableCell>
@@ -307,7 +358,7 @@ export default function NodesPage() {
                 </TableRow>
               ))}
               {!filtered.length && (
-                <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">暂无节点</TableCell></TableRow>
+                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">暂无节点</TableCell></TableRow>
               )}
             </TableBody>
           </Table>

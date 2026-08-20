@@ -47,6 +47,10 @@ type manualNodeRequest struct {
 	ShareURL string                 `json:"share_url"`
 }
 
+type nodeOrderRequest struct {
+	IDs []int64 `json:"ids"`
+}
+
 type configResponseMeta struct {
 	filename    string
 	contentType string
@@ -892,6 +896,28 @@ func (h *Handlers) ListNodes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	SendSuccess(w, nodes)
+}
+
+// UpdateNodeOrder 更新节点全局顺序。顺序同时用于节点页、策略配置和订阅输出。
+func (h *Handlers) UpdateNodeOrder(w http.ResponseWriter, r *http.Request) {
+	var req nodeOrderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		SendError(w, http.StatusBadRequest, "无效的请求体")
+		return
+	}
+	if len(req.IDs) == 0 {
+		SendError(w, http.StatusBadRequest, "节点顺序不能为空")
+		return
+	}
+	if err := h.nodeService.UpdateNodeOrder(r.Context(), req.IDs); err != nil {
+		SendError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// 顺序变更必须让已生成的订阅配置立即重新生成。
+	if h.policyCache != nil {
+		_ = h.policyCache.DeleteAllByPattern(r.Context(), "ruleflow:policy:config:*")
+	}
+	SendSuccess(w, map[string]interface{}{"ids": req.IDs})
 }
 
 // UpdateNode 更新节点

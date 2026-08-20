@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/ablate-ai/RuleFlow/database"
@@ -139,9 +138,9 @@ func (s *ConfigPolicyService) ValidateConfig(policy *database.ConfigPolicy) erro
 		return fmt.Errorf("配置策略名称不能为空")
 	}
 
-	// 验证数据源（至少选一个订阅源或手动节点）
-	if !policy.IncludeAllSubscriptions && len(policy.SubscriptionIDs) == 0 && len(policy.NodeIDs) == 0 {
-		return fmt.Errorf("至少需要选择一个订阅源或手动节点")
+	// 配置策略只分发已进入 RuleFlow 的节点。订阅源负责同步节点，不参与分发选择。
+	if len(policy.NodeIDs) == 0 {
+		return fmt.Errorf("至少需要选择一个 RuleFlow 节点")
 	}
 
 	// 验证目标类型
@@ -162,13 +161,10 @@ func isSupportedConfigTarget(target string) bool {
 }
 
 func (s *ConfigPolicyService) sanitizePolicyReferences(ctx context.Context, policy *database.ConfigPolicy) {
-	policy.SubscriptionIDs = sanitizeExistingIDs(policy.SubscriptionIDs, func(id int64) bool {
-		if s.subRepo == nil {
-			return true
-		}
-		_, err := s.subRepo.GetByID(ctx, id)
-		return err == nil
-	})
+	// Keep the API contract aligned with the console: subscription rows only
+	// import nodes into RuleFlow and never define a policy's output.
+	policy.SubscriptionIDs = []int64{}
+	policy.IncludeAllSubscriptions = false
 	policy.NodeIDs = sanitizeExistingIDs(policy.NodeIDs, func(id int64) bool {
 		if s.nodeRepo == nil {
 			return true
@@ -203,125 +199,17 @@ func sanitizeExistingIDs(ids []int64, exists func(int64) bool) []int64 {
 
 // GetNodesForPolicy 获取策略对应的节点
 func (s *ConfigPolicyService) GetNodesForPolicy(ctx context.Context, policy *database.ConfigPolicy) ([]database.Node, error) {
-	// 收集所有节点
-	allNodes := make([]database.Node, 0)
-	subscriptionIDs, err := s.subscriptionIDsForPolicy(ctx, policy)
-	if err != nil {
-		return nil, err
-	}
-	seenNodes := make(map[int64]struct{})
-	appendNodes := func(nodes []database.Node) {
-		for _, node := range nodes {
-			if node.ID > 0 {
-				if _, seen := seenNodes[node.ID]; seen {
-					continue
-				}
-				seenNodes[node.ID] = struct{}{}
-			}
-			allNodes = append(allNodes, node)
-		}
-	}
-
-	// 从订阅源获取节点，并应用该订阅的过滤规则
-	for _, subID := range subscriptionIDs {
-		id := subID
-		nodes, err := s.nodeRepo.List(ctx, database.NodeFilter{SourceID: &id})
-		if err != nil {
-			return nil, fmt.Errorf("获取节点失败 (订阅 ID: %d): %w", subID, err)
-		}
-		// 加载订阅过滤规则（失败不阻塞）
-		if sub, err := s.subRepo.GetByID(ctx, subID); err == nil && sub.FilterRules != nil {
-			nodes = applySubscriptionFilter(nodes, sub.FilterRules)
-		}
-		appendNodes(nodes)
-	}
-
-	// 获取指定的手动节点
-	if len(policy.NodeIDs) > 0 {
-		nodes, err := s.nodeRepo.List(ctx, database.NodeFilter{IDs: policy.NodeIDs})
-		if err != nil {
-			return nil, fmt.Errorf("获取手动节点失败: %w", err)
-		}
-		appendNodes(nodes)
-	}
-
-	// 应用节点过滤条件
-	if policy.NodeFilters != nil && len(policy.NodeFilters) > 0 {
-		allNodes = s.applyNodeFilters(allNodes, policy.NodeFilters)
-	}
-
-	// Keep nodes sharing the same name prefix together in generated
-	// subscriptions (for example LA-* followed by KS-*), while preserving the
-	// original order inside each group.
-	sortNodesByEgress(allNodes)
-
-	return allNodes, nil
-}
-
-func sortNodesByEgress(nodes []database.Node) {
-	groupOrder := make(map[string]int, len(nodes))
-	for _, node := range nodes {
-		group := nodeEgressGroup(node.Name)
-		if _, exists := groupOrder[group]; !exists {
-			groupOrder[group] = len(groupOrder)
-		}
-	}
-
-	sort.SliceStable(nodes, func(i, j int) bool {
-		return groupOrder[nodeEgressGroup(nodes[i].Name)] < groupOrder[nodeEgressGroup(nodes[j].Name)]
-	})
-}
-
-func nodeEgressGroup(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
-	if index := strings.IndexByte(name, '-'); index > 0 {
-		return strings.ToLower(strings.TrimSpace(name[:index]))
-	}
-	return strings.ToLower(name)
-}
-
-// subscriptionIDsForPolicy 返回策略实际使用的订阅源，显式订阅与所有启用订阅合并去重。
-func (s *ConfigPolicyService) subscriptionIDsForPolicy(ctx context.Context, policy *database.ConfigPolicy) ([]int64, error) {
 	if policy == nil {
-		return []int64{}, nil
+		return nil, fmt.Errorf("配置策略不能为空")
 	}
-
-	ids := make([]int64, 0, len(policy.SubscriptionIDs))
-	seen := make(map[int64]struct{}, len(policy.SubscriptionIDs))
-	for _, id := range policy.SubscriptionIDs {
-		if id <= 0 {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
-	if !policy.IncludeAllSubscriptions {
-		return ids, nil
-	}
-	if s.subRepo == nil {
-		return nil, fmt.Errorf("无法获取所有订阅源：订阅仓储未配置")
-	}
-	subs, err := s.subRepo.List(ctx)
+	nodes, err := s.nodeRepo.List(ctx, database.NodeFilter{IDs: policy.NodeIDs})
 	if err != nil {
-		return nil, fmt.Errorf("获取所有启用订阅失败: %w", err)
+		return nil, fmt.Errorf("获取策略节点失败: %w", err)
 	}
-	for _, sub := range subs {
-		if !sub.Enabled {
-			continue
-		}
-		if _, ok := seen[sub.ID]; ok {
-			continue
-		}
-		seen[sub.ID] = struct{}{}
-		ids = append(ids, sub.ID)
+	if policy.NodeFilters != nil && len(policy.NodeFilters) > 0 {
+		nodes = s.applyNodeFilters(nodes, policy.NodeFilters)
 	}
-	return ids, nil
+	return nodes, nil
 }
 
 // GetUserInfoForPolicy 汇总策略关联的所有订阅流量信息
@@ -329,8 +217,26 @@ func (s *ConfigPolicyService) GetUserInfoForPolicy(ctx context.Context, policy *
 	if s.subRepo == nil || policy == nil {
 		return nil
 	}
-	subscriptionIDs, err := s.subscriptionIDsForPolicy(ctx, policy)
-	if err != nil || len(subscriptionIDs) == 0 {
+	if len(policy.NodeIDs) == 0 {
+		return nil
+	}
+	nodes, err := s.nodeRepo.List(ctx, database.NodeFilter{IDs: policy.NodeIDs})
+	if err != nil {
+		return nil
+	}
+	subscriptionIDs := make([]int64, 0)
+	seen := make(map[int64]struct{})
+	for _, node := range nodes {
+		if node.SourceID == nil {
+			continue
+		}
+		if _, exists := seen[*node.SourceID]; exists {
+			continue
+		}
+		seen[*node.SourceID] = struct{}{}
+		subscriptionIDs = append(subscriptionIDs, *node.SourceID)
+	}
+	if len(subscriptionIDs) == 0 {
 		return nil
 	}
 	var hasInfo bool

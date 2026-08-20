@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -110,6 +111,36 @@ func (s *SubscriptionSyncService) invalidateRelatedPolicyCaches(ctx context.Cont
 
 	if invalidated > 0 {
 		log.Printf("[sync] 已清理关联配置缓存: subscription_id=%d count=%d", subscriptionID, invalidated)
+	}
+}
+
+func (s *SubscriptionSyncService) invalidateNodePolicyCaches(ctx context.Context, replacements map[int64]int64) {
+	if len(replacements) == 0 || s.policyRepo == nil || s.policyCache == nil {
+		return
+	}
+	policies, err := s.policyRepo.List(ctx)
+	if err != nil {
+		log.Printf("[sync] 查询节点策略缓存失败: err=%v", err)
+		return
+	}
+	for _, policy := range policies {
+		matched := false
+		for _, nodeID := range policy.NodeIDs {
+			for _, replacementID := range replacements {
+				if nodeID == replacementID {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				break
+			}
+		}
+		if matched && strings.TrimSpace(policy.Token) != "" {
+			if err := s.policyCache.DeletePolicyConfig(ctx, policy.Token); err != nil {
+				log.Printf("[sync] 清理节点策略缓存失败: policy_id=%d err=%v", policy.ID, err)
+			}
+		}
 	}
 }
 
@@ -223,6 +254,13 @@ func (s *SubscriptionSyncService) applyPreparedSubscriptionSync(ctx context.Cont
 		return 0, prepared.err
 	}
 
+	// 保留同步前的全局节点顺序。订阅同步会替换节点记录，之后按业务身份
+	// 把仍然存在的节点放回原位置，避免定时刷新破坏用户的拖拽排序。
+	previousNodes, err := s.nodeRepo.List(ctx, database.NodeFilter{})
+	if err != nil {
+		return 0, fmt.Errorf("读取同步前节点顺序失败: %w", err)
+	}
+
 	namePrefix := ""
 	if !prepared.sub.DisableNamePrefix {
 		namePrefix = fmt.Sprintf("%s-", strings.TrimSpace(prepared.sub.Name))
@@ -238,6 +276,16 @@ func (s *SubscriptionSyncService) applyPreparedSubscriptionSync(ctx context.Cont
 		log.Printf("[sync] 插入新节点失败: id=%d err=%v", prepared.sub.ID, err)
 		return 0, fmt.Errorf("插入新节点失败: %w", err)
 	}
+	replacements, err := s.restoreSubscriptionNodeOrder(ctx, prepared.sub.ID, previousNodes)
+	if err != nil {
+		return 0, fmt.Errorf("恢复节点顺序失败: %w", err)
+	}
+	if s.policyRepo != nil {
+		if err := s.policyRepo.RemapNodeIDs(ctx, replacements); err != nil {
+			return 0, fmt.Errorf("更新策略节点引用失败: %w", err)
+		}
+	}
+	s.invalidateNodePolicyCaches(ctx, replacements)
 
 	now := time.Now()
 	nodeCount := len(dbNodes)
@@ -256,6 +304,69 @@ func (s *SubscriptionSyncService) applyPreparedSubscriptionSync(ctx context.Cont
 	s.invalidateRelatedPolicyCaches(ctx, prepared.sub.ID)
 	log.Printf("[sync] 同步完成: %s，节点数: %d", prepared.sub.Name, nodeCount)
 	return nodeCount, nil
+}
+
+func nodeIdentity(node database.Node) string {
+	return fmt.Sprintf("%s\x00%s\x00%d", node.Name, node.Server, node.Port)
+}
+
+func (s *SubscriptionSyncService) restoreSubscriptionNodeOrder(ctx context.Context, sourceID int64, previousNodes []database.Node) (map[int64]int64, error) {
+	currentNodes, err := s.nodeRepo.List(ctx, database.NodeFilter{})
+	if err != nil {
+		return nil, err
+	}
+
+	currentByIdentity := make(map[string]database.Node)
+	for _, node := range currentNodes {
+		if node.SourceID != nil && *node.SourceID == sourceID {
+			currentByIdentity[nodeIdentity(node)] = node
+		}
+	}
+
+	ordered := make([]database.Node, 0, len(currentNodes))
+	replacements := make(map[int64]int64)
+	seen := make(map[int64]struct{}, len(currentNodes))
+	for _, previous := range previousNodes {
+		if previous.SourceID != nil && *previous.SourceID == sourceID {
+			if replacement, ok := currentByIdentity[nodeIdentity(previous)]; ok {
+				ordered = append(ordered, replacement)
+				seen[replacement.ID] = struct{}{}
+				replacements[previous.ID] = replacement.ID
+			}
+			continue
+		}
+		for _, current := range currentNodes {
+			if current.ID == previous.ID {
+				ordered = append(ordered, current)
+				seen[current.ID] = struct{}{}
+				break
+			}
+		}
+	}
+
+	newNodes := make([]database.Node, 0)
+	for _, current := range currentNodes {
+		if _, ok := seen[current.ID]; ok {
+			continue
+		}
+		newNodes = append(newNodes, current)
+	}
+	sort.SliceStable(newNodes, func(i, j int) bool {
+		if newNodes[i].SortOrder != newNodes[j].SortOrder {
+			return newNodes[i].SortOrder < newNodes[j].SortOrder
+		}
+		return newNodes[i].ID < newNodes[j].ID
+	})
+	ordered = append(ordered, newNodes...)
+
+	ids := make([]int64, 0, len(ordered))
+	for _, node := range ordered {
+		ids = append(ids, node.ID)
+	}
+	if err := s.nodeRepo.UpdateOrder(ctx, ids); err != nil {
+		return nil, err
+	}
+	return replacements, nil
 }
 
 // convertToDBNodes 将解析的节点转换为数据库模型

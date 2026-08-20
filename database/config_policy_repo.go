@@ -294,3 +294,19 @@ func (r *ConfigPolicyRepo) TouchAccess(ctx context.Context, id int64) error {
 
 	return nil
 }
+
+// RemapNodeIDs 在订阅节点被重建后，将策略中仍引用旧节点 ID 的项映射到新 ID。
+func (r *ConfigPolicyRepo) RemapNodeIDs(ctx context.Context, replacements map[int64]int64) error {
+	for oldID, newID := range replacements {
+		if oldID <= 0 || newID <= 0 || oldID == newID {
+			continue
+		}
+		if _, err := r.db.Pool.Exec(ctx,
+			`UPDATE config_policies SET node_ids = array_replace(node_ids, $1, $2) WHERE $1 = ANY(node_ids)`,
+			oldID, newID,
+		); err != nil {
+			return fmt.Errorf("映射策略节点 ID 失败: %d -> %d: %w", oldID, newID, err)
+		}
+	}
+	return nil
+}

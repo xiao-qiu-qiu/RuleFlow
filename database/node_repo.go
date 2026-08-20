@@ -13,6 +13,7 @@ import (
 // Node 节点模型
 type Node struct {
 	ID           int64                  `json:"id"`
+	SortOrder    int64                  `json:"sort_order"`
 	Name         string                 `json:"name"`
 	Protocol     string                 `json:"protocol"`
 	Server       string                 `json:"server"`
@@ -50,14 +51,22 @@ func NewNodeRepo(db *DB) *NodeRepo {
 // Create 创建节点
 func (r *NodeRepo) Create(ctx context.Context, node *Node) error {
 	node.ID = NextID()
+	if node.SortOrder <= 0 {
+		next, err := r.nextSortOrder(ctx)
+		if err != nil {
+			return fmt.Errorf("分配节点排序位置失败: %w", err)
+		}
+		node.SortOrder = next
+	}
 	query := `
-		INSERT INTO nodes (id, name, protocol, server, port, config, source_id, enabled, tags)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			INSERT INTO nodes (id, sort_order, name, protocol, server, port, config, source_id, enabled, tags)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING created_at, updated_at
 	`
 
 	err := r.db.Pool.QueryRow(ctx, query,
 		node.ID,
+		node.SortOrder,
 		node.Name,
 		node.Protocol,
 		node.Server,
@@ -83,19 +92,27 @@ func (r *NodeRepo) Create(ctx context.Context, node *Node) error {
 // 重复导入时只覆盖协议与配置，保留已有节点的启用状态和标签。
 func (r *NodeRepo) UpsertManualImported(ctx context.Context, node *Node) (bool, error) {
 	node.ID = NextID()
+	if node.SortOrder <= 0 {
+		next, err := r.nextSortOrder(ctx)
+		if err != nil {
+			return false, fmt.Errorf("分配节点排序位置失败: %w", err)
+		}
+		node.SortOrder = next
+	}
 	query := `
-		INSERT INTO nodes (id, name, protocol, server, port, config, source_id, enabled, tags)
-		VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8)
+			INSERT INTO nodes (id, sort_order, name, protocol, server, port, config, source_id, enabled, tags)
+			VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9)
 		ON CONFLICT (name, server, port) WHERE source_id IS NULL
 		DO UPDATE SET
 			protocol = EXCLUDED.protocol,
 			config = EXCLUDED.config
-		RETURNING created_at, updated_at, xmax = 0 AS inserted
+			RETURNING sort_order, created_at, updated_at, xmax = 0 AS inserted
 	`
 
 	var inserted bool
 	err := r.db.Pool.QueryRow(ctx, query,
 		node.ID,
+		node.SortOrder,
 		node.Name,
 		node.Protocol,
 		node.Server,
@@ -103,7 +120,7 @@ func (r *NodeRepo) UpsertManualImported(ctx context.Context, node *Node) (bool, 
 		node.Config,
 		node.Enabled,
 		node.Tags,
-	).Scan(&node.CreatedAt, &node.UpdatedAt, &inserted)
+	).Scan(&node.SortOrder, &node.CreatedAt, &node.UpdatedAt, &inserted)
 
 	if err != nil {
 		return false, fmt.Errorf("导入节点失败: %w", err)
@@ -112,10 +129,18 @@ func (r *NodeRepo) UpsertManualImported(ctx context.Context, node *Node) (bool, 
 	return inserted, nil
 }
 
+func (r *NodeRepo) nextSortOrder(ctx context.Context) (int64, error) {
+	var next int64
+	if err := r.db.Pool.QueryRow(ctx, `SELECT COALESCE(MAX(sort_order), 0) + 1 FROM nodes`).Scan(&next); err != nil {
+		return 0, err
+	}
+	return next, nil
+}
+
 // GetByID 根据 ID 获取节点
 func (r *NodeRepo) GetByID(ctx context.Context, id int64) (*Node, error) {
 	query := `
-		SELECT n.id, n.name, n.protocol, n.server, n.port, n.config, n.source_id,
+			SELECT n.id, n.sort_order, n.name, n.protocol, n.server, n.port, n.config, n.source_id,
 		       COALESCE(s.name, '') AS source_name,
 		       n.enabled, n.tags, n.created_at, n.updated_at, n.last_synced_at
 		FROM nodes n
@@ -126,6 +151,7 @@ func (r *NodeRepo) GetByID(ctx context.Context, id int64) (*Node, error) {
 	node := &Node{}
 	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
 		&node.ID,
+		&node.SortOrder,
 		&node.Name,
 		&node.Protocol,
 		&node.Server,
@@ -153,7 +179,7 @@ func (r *NodeRepo) GetByID(ctx context.Context, id int64) (*Node, error) {
 // List 根据筛选条件列出节点
 func (r *NodeRepo) List(ctx context.Context, filter NodeFilter) ([]Node, error) {
 	query := `
-		SELECT n.id, n.name, n.protocol, n.server, n.port, n.config, n.source_id,
+			SELECT n.id, n.sort_order, n.name, n.protocol, n.server, n.port, n.config, n.source_id,
 		       COALESCE(s.name, '') AS source_name,
 		       n.enabled, n.tags, n.created_at, n.updated_at, n.last_synced_at
 		FROM nodes n
@@ -210,7 +236,7 @@ func (r *NodeRepo) List(ctx context.Context, filter NodeFilter) ([]Node, error) 
 		query += ")"
 	}
 
-	query += " ORDER BY n.created_at DESC"
+	query += " ORDER BY n.sort_order ASC, n.created_at DESC, n.id DESC"
 
 	rows, err := r.db.Pool.Query(ctx, query, args...)
 	if err != nil {
@@ -223,6 +249,7 @@ func (r *NodeRepo) List(ctx context.Context, filter NodeFilter) ([]Node, error) 
 		node := Node{}
 		err := rows.Scan(
 			&node.ID,
+			&node.SortOrder,
 			&node.Name,
 			&node.Protocol,
 			&node.Server,
@@ -324,15 +351,24 @@ func (r *NodeRepo) batchInsert(ctx context.Context, nodes []Node) error {
 	}
 	defer tx.Rollback(ctx)
 
-	query := `
-		INSERT INTO nodes (id, name, protocol, server, port, config, source_id, enabled, tags)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`
+	var baseOrder int64
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(sort_order), 0) FROM nodes`).Scan(&baseOrder); err != nil {
+		return fmt.Errorf("读取节点排序位置失败: %w", err)
+	}
 
-	for _, node := range nodes {
+	query := `
+			INSERT INTO nodes (id, sort_order, name, protocol, server, port, config, source_id, enabled, tags)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		`
+
+	for index, node := range nodes {
 		node.ID = NextID()
+		if node.SortOrder <= 0 {
+			node.SortOrder = baseOrder + int64(index) + 1
+		}
 		_, err := tx.Exec(ctx, query,
 			node.ID,
+			node.SortOrder,
 			node.Name,
 			node.Protocol,
 			node.Server,
@@ -398,6 +434,41 @@ func (r *NodeRepo) BatchUpdateEnabled(ctx context.Context, ids []int64, enabled 
 	}
 
 	return result.RowsAffected(), nil
+}
+
+// UpdateOrder 按调用方提供的顺序更新节点的全局排序位置。
+func (r *NodeRepo) UpdateOrder(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("开始更新节点顺序事务失败: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var matchedCount, totalCount int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM nodes WHERE id = ANY($1)`, ids).Scan(&matchedCount); err != nil {
+		return fmt.Errorf("校验节点顺序失败: %w", err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM nodes`).Scan(&totalCount); err != nil {
+		return fmt.Errorf("读取节点总数失败: %w", err)
+	}
+	if matchedCount != len(ids) || totalCount != len(ids) {
+		return fmt.Errorf("节点顺序必须包含全部且不重复的节点")
+	}
+
+	for index, id := range ids {
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET sort_order = $1 WHERE id = $2`, index+1, id); err != nil {
+			return fmt.Errorf("更新节点顺序失败: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("提交节点顺序事务失败: %w", err)
+	}
+	return nil
 }
 
 // CountBySourceID 统计指定来源 ID 的节点数量

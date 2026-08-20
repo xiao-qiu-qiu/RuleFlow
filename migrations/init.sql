@@ -130,9 +130,9 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 COMMENT ON TABLE config_policies IS '配置生成策略表';
-COMMENT ON COLUMN config_policies.subscription_ids IS '关联的订阅源 ID，可以从多个订阅源合并节点';
-COMMENT ON COLUMN config_policies.include_all_subscriptions IS '是否自动包含所有启用的订阅源';
-COMMENT ON COLUMN config_policies.node_ids IS '直接指定的手动节点 ID 列表';
+COMMENT ON COLUMN config_policies.subscription_ids IS '历史字段，策略仅使用 node_ids 选择节点';
+COMMENT ON COLUMN config_policies.include_all_subscriptions IS '历史字段，策略仅使用 node_ids 选择节点';
+COMMENT ON COLUMN config_policies.node_ids IS '直接指定的 RuleFlow 节点 ID 列表，按 nodes.sort_order 输出';
 COMMENT ON COLUMN config_policies.template_name IS '使用的规则模板，为空则使用内置模板';
 COMMENT ON COLUMN config_policies.node_filters IS '节点过滤条件，JSON 格式存储复杂的过滤逻辑';
 COMMENT ON COLUMN config_policies.last_accessed_at IS '用户最近一次成功请求订阅配置的时间';
@@ -167,6 +167,7 @@ COMMENT ON COLUMN config_access_logs.error_message IS '失败原因';
 
 CREATE TABLE IF NOT EXISTS nodes (
     id BIGINT PRIMARY KEY,
+    sort_order BIGINT NOT NULL DEFAULT 0,
     name VARCHAR(255) NOT NULL,
     protocol VARCHAR(20) NOT NULL,
     server VARCHAR(255) NOT NULL,
@@ -183,6 +184,7 @@ CREATE TABLE IF NOT EXISTS nodes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_nodes_source_id ON nodes(source_id) WHERE source_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_nodes_sort_order ON nodes(sort_order, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_nodes_protocol ON nodes(protocol);
 CREATE INDEX IF NOT EXISTS idx_nodes_enabled ON nodes(enabled) WHERE enabled = true;
 CREATE INDEX IF NOT EXISTS idx_nodes_tags ON nodes USING GIN(tags);

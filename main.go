@@ -368,6 +368,7 @@ func setupRoutes(cfg *config.Config, sessionSecret string, apiHandlers *api.Hand
 		// 节点管理
 		r.Get("/nodes", apiHandlers.ListNodes)
 		r.Post("/nodes", apiHandlers.CreateNode)
+		r.Patch("/nodes/order", apiHandlers.UpdateNodeOrder)
 		r.Get("/nodes/stats", apiHandlers.GetNodeStats)
 		r.Post("/nodes/import", apiHandlers.ImportNodes)
 		r.Post("/nodes/batch", apiHandlers.BatchNodeOperation)

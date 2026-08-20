@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { get, post, put, del } from "@/lib/api";
-import type { ConfigPolicy, ConfigPolicyForm, ConfigTarget, Subscription, Template, Node } from "@/types";
+import type { ConfigPolicy, ConfigPolicyForm, ConfigTarget, Template, Node } from "@/types";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -42,11 +42,12 @@ export default function ConfigsPage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
   const { data: policies, isLoading } = useQuery({ queryKey: ["configPolicies"], queryFn: () => get<ConfigPolicy[]>("/api/config-policies") });
-  const { data: subs } = useQuery({ queryKey: ["subscriptions"], queryFn: () => get<Subscription[]>("/api/subscriptions") });
   const { data: templates } = useQuery({ queryKey: ["templates"], queryFn: () => get<Template[]>("/api/templates") });
   const { data: nodes } = useQuery({ queryKey: ["nodes"], queryFn: () => get<Node[]>("/api/nodes") });
 
-  const manualNodes = nodes?.filter((n) => !n.source_id) ?? [];
+  // Subscription sources only populate RuleFlow. Policy selection always uses
+  // the resulting node records, including nodes that came from a subscription.
+  const ruleflowNodes = nodes ?? [];
 
   const saveMut = useMutation({
     mutationFn: (data: ConfigPolicyForm) =>
@@ -74,10 +75,17 @@ export default function ConfigsPage() {
     setEditId(p.id);
     setForm({
       name: p.name, description: p.description, target: p.target,
-      template_name: p.template_name, enabled: p.enabled, include_all_subscriptions: p.include_all_subscriptions,
-      subscription_ids: p.subscription_ids || [], node_ids: p.node_ids || [],
+      template_name: p.template_name, enabled: p.enabled, include_all_subscriptions: false,
+      subscription_ids: [], node_ids: orderNodeIds(p.node_ids || [], nodes || []),
     });
     setDialogOpen(true);
+  }
+
+  function orderNodeIds(ids: number[], orderedNodes: Node[]): number[] {
+    const selected = new Set(ids);
+    const ordered = orderedNodes.filter((node) => selected.has(node.id)).map((node) => node.id);
+    const known = new Set(ordered);
+    return [...ordered, ...ids.filter((id) => !known.has(id))];
   }
 
   async function copySubscribeUrl(token: string, target: ConfigTarget) {
@@ -94,21 +102,15 @@ export default function ConfigsPage() {
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "操作失败"); }
   }
 
-  function toggleSubId(id: number) {
-    setForm((f) => ({
-      ...f,
-      subscription_ids: f.subscription_ids.includes(id)
-        ? f.subscription_ids.filter((x) => x !== id)
-        : [...f.subscription_ids, id],
-    }));
-  }
-
   function toggleNodeId(id: number) {
     setForm((f) => ({
       ...f,
-      node_ids: f.node_ids.includes(id)
-        ? f.node_ids.filter((x) => x !== id)
-        : [...f.node_ids, id],
+      subscription_ids: [],
+      include_all_subscriptions: false,
+      node_ids: orderNodeIds(
+        f.node_ids.includes(id) ? f.node_ids.filter((x) => x !== id) : [...f.node_ids, id],
+        ruleflowNodes,
+      ),
     }));
   }
 
@@ -146,7 +148,6 @@ export default function ConfigsPage() {
                 </div>
                 <div className="flex flex-wrap gap-1.5 text-xs">
                   <span className="text-muted-foreground">模板：{p.template_name || "—"}</span>
-                  <span className="text-muted-foreground">• 订阅：{p.include_all_subscriptions ? "全部启用" : (p.subscription_ids?.length || 0)}</span>
                   <span className="text-muted-foreground">• 节点：{p.node_ids?.length || 0}</span>
                 </div>
                 <div className="flex items-center gap-1.5 text-xs bg-muted rounded-md px-2 py-1.5">
@@ -188,28 +189,16 @@ export default function ConfigsPage() {
             </div>
             <div className="space-y-2"><Label>描述</Label><Textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} rows={2} /></div>
             <div className="flex items-center justify-between"><Label>启用</Label><Switch checked={form.enabled} onCheckedChange={(v) => setForm((f) => ({ ...f, enabled: v }))} /></div>
-            <div className="flex items-center justify-between"><Label>包含所有启用订阅</Label><Switch checked={form.include_all_subscriptions} onCheckedChange={(v) => setForm((f) => ({ ...f, include_all_subscriptions: v }))} /></div>
-            {subs && subs.length > 0 && (
+            {ruleflowNodes.length > 0 && (
               <div className="space-y-2">
-                <Label>订阅源</Label>
+                <Label>RuleFlow 节点</Label>
                 <div className="max-h-32 overflow-y-auto space-y-1.5 border rounded-md p-2">
-                  {subs.map((s) => (
-                    <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                      <Checkbox checked={form.subscription_ids.includes(s.id)} onCheckedChange={() => toggleSubId(s.id)} />
-                      {s.name}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            {manualNodes.length > 0 && (
-              <div className="space-y-2">
-                <Label>手动节点</Label>
-                <div className="max-h-32 overflow-y-auto space-y-1.5 border rounded-md p-2">
-                  {manualNodes.map((n) => (
+                  {ruleflowNodes.map((n) => (
                     <label key={n.id} className="flex items-center gap-2 text-sm cursor-pointer">
                       <Checkbox checked={form.node_ids.includes(n.id)} onCheckedChange={() => toggleNodeId(n.id)} />
-                      {n.name} <Badge variant="outline" className="text-[10px]">{n.protocol}</Badge>
+                      <span className="truncate">{n.name}</span>
+                      <Badge variant="outline" className="text-[10px]">{n.protocol}</Badge>
+                      {n.source_name && <span className="text-[10px] text-muted-foreground truncate">{n.source_name}</span>}
                     </label>
                   ))}
                 </div>

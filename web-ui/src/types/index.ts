@@ -40,6 +40,7 @@ export interface Template {
 
 export interface Node {
   id: number;
+  sort_order: number;
   name: string;
   protocol: string;
   server: string;
