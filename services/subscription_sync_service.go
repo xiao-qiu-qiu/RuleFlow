@@ -126,8 +126,8 @@ func (s *SubscriptionSyncService) invalidateNodePolicyCaches(ctx context.Context
 	for _, policy := range policies {
 		matched := false
 		for _, nodeID := range policy.NodeIDs {
-			for _, replacementID := range replacements {
-				if nodeID == replacementID {
+			for oldID := range replacements {
+				if nodeID == oldID {
 					matched = true
 					break
 				}
