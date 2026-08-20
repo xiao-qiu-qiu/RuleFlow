@@ -323,7 +323,11 @@ export default function NodesPage() {
               {filtered.map((node) => (
                 <TableRow
                   key={node.id}
-                  onDragOver={(event) => { if (sortMode === "custom") event.preventDefault(); }}
+                  onDragOver={(event) => {
+                    if (sortMode !== "custom" || draggingId === null) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                  }}
                   onDrop={() => handleDrop(node.id)}
                   className={draggingId === node.id ? "opacity-50" : undefined}
                 >
@@ -337,7 +341,11 @@ export default function NodesPage() {
                       disabled={sortMode !== "custom" || reorderMut.isPending}
                       title={sortMode === "custom" ? "拖动调整顺序" : "切换到自定义顺序后可拖动"}
                       aria-label="拖动调整顺序"
-                      onDragStart={(event) => { setDraggingId(node.id); event.dataTransfer.effectAllowed = "move"; }}
+                      onDragStart={(event) => {
+                        setDraggingId(node.id);
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", String(node.id));
+                      }}
                       onDragEnd={() => setDraggingId(null)}
                     >
                       <GripVertical className="size-4 text-muted-foreground" />
