@@ -202,6 +202,9 @@ func (s *ConfigPolicyService) GetNodesForPolicy(ctx context.Context, policy *dat
 	if policy == nil {
 		return nil, fmt.Errorf("配置策略不能为空")
 	}
+	if len(policy.NodeIDs) == 0 {
+		return []database.Node{}, nil
+	}
 	nodes, err := s.nodeRepo.List(ctx, database.NodeFilter{IDs: policy.NodeIDs})
 	if err != nil {
 		return nil, fmt.Errorf("获取策略节点失败: %w", err)
