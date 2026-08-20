@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/ablate-ai/RuleFlow/database"
@@ -249,7 +250,37 @@ func (s *ConfigPolicyService) GetNodesForPolicy(ctx context.Context, policy *dat
 		allNodes = s.applyNodeFilters(allNodes, policy.NodeFilters)
 	}
 
+	// Keep nodes sharing the same name prefix together in generated
+	// subscriptions (for example LA-* followed by KS-*), while preserving the
+	// original order inside each group.
+	sortNodesByEgress(allNodes)
+
 	return allNodes, nil
+}
+
+func sortNodesByEgress(nodes []database.Node) {
+	groupOrder := make(map[string]int, len(nodes))
+	for _, node := range nodes {
+		group := nodeEgressGroup(node.Name)
+		if _, exists := groupOrder[group]; !exists {
+			groupOrder[group] = len(groupOrder)
+		}
+	}
+
+	sort.SliceStable(nodes, func(i, j int) bool {
+		return groupOrder[nodeEgressGroup(nodes[i].Name)] < groupOrder[nodeEgressGroup(nodes[j].Name)]
+	})
+}
+
+func nodeEgressGroup(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if index := strings.IndexByte(name, '-'); index > 0 {
+		return strings.ToLower(strings.TrimSpace(name[:index]))
+	}
+	return strings.ToLower(name)
 }
 
 // subscriptionIDsForPolicy 返回策略实际使用的订阅源，显式订阅与所有启用订阅合并去重。

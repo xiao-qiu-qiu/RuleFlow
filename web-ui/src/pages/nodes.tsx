@@ -17,6 +17,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Trash2, Pencil, Upload, Copy, Loader2, Server, CheckSquare, XSquare } from "lucide-react";
 
+type SortMode = "default" | "egress" | "name" | "server" | "protocol";
+
+function egressGroup(name: string): string {
+  const trimmed = name.trim();
+  const separator = trimmed.indexOf("-");
+  return (separator > 0 ? trimmed.slice(0, separator) : trimmed).toLocaleLowerCase();
+}
+
 function timeAgo(d: string | null) {
   if (!d) return "从未";
   const ms = Date.now() - new Date(d).getTime();
@@ -31,6 +39,11 @@ function timeAgo(d: string | null) {
 export default function NodesPage() {
   const qc = useQueryClient();
   const [filter, setFilter] = useState({ protocol: "", enabled: "", search: "", source: "" });
+  const [sortMode, setSortMode] = useState<SortMode>(() => {
+    if (typeof window === "undefined") return "egress";
+    const stored = window.localStorage.getItem("ruleflow-node-sort");
+    return stored === "default" || stored === "egress" || stored === "name" || stored === "server" || stored === "protocol" ? stored : "egress";
+  });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
@@ -50,7 +63,7 @@ export default function NodesPage() {
 
   const filtered = useMemo(() => {
     if (!nodes) return [];
-    return nodes.filter((n) => {
+    const result = nodes.filter((n) => {
       if (filter.protocol && n.protocol !== filter.protocol) return false;
       if (filter.enabled === "true" && !n.enabled) return false;
       if (filter.enabled === "false" && n.enabled) return false;
@@ -59,7 +72,28 @@ export default function NodesPage() {
       if (filter.source && filter.source !== "manual" && n.source_name !== filter.source) return false;
       return true;
     });
-  }, [nodes, filter]);
+
+    if (sortMode === "default") return result;
+    const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
+    return result
+      .map((node, index) => ({ node, index }))
+      .sort((a, b) => {
+        if (sortMode === "egress") {
+          const groupCompare = collator.compare(egressGroup(a.node.name), egressGroup(b.node.name));
+          return groupCompare || a.index - b.index;
+        }
+        if (sortMode === "name") return collator.compare(a.node.name, b.node.name) || a.index - b.index;
+        if (sortMode === "server") return collator.compare(`${a.node.server}:${a.node.port}`, `${b.node.server}:${b.node.port}`) || a.index - b.index;
+        return collator.compare(a.node.protocol, b.node.protocol) || a.index - b.index;
+      })
+      .map(({ node }) => node);
+  }, [nodes, filter, sortMode]);
+
+  function changeSortMode(value: string) {
+    const next = value as SortMode;
+    setSortMode(next);
+    window.localStorage.setItem("ruleflow-node-sort", next);
+  }
 
   const protocols = useMemo(() => {
     if (!nodes) return [];
@@ -211,6 +245,16 @@ export default function NodesPage() {
             <SelectItem value="all">全部来源</SelectItem>
             <SelectItem value="manual">手动添加</SelectItem>
             {sources.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={sortMode} onValueChange={changeSortMode}>
+          <SelectTrigger className="w-44"><SelectValue placeholder="排序" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="egress">自定义：按出口分组</SelectItem>
+            <SelectItem value="default">默认顺序</SelectItem>
+            <SelectItem value="name">名称排序</SelectItem>
+            <SelectItem value="server">服务器排序</SelectItem>
+            <SelectItem value="protocol">协议排序</SelectItem>
           </SelectContent>
         </Select>
       </div>

@@ -48,8 +48,8 @@ func TestValidateConfigAfterSanitize(t *testing.T) {
 
 func TestValidateConfigAllowsAllSubscriptionsWithoutExplicitSources(t *testing.T) {
 	policy := &database.ConfigPolicy{
-		Name:                     "all-subs",
-		Target:                   "clash-mihomo",
+		Name:                    "all-subs",
+		Target:                  "clash-mihomo",
 		IncludeAllSubscriptions: true,
 	}
 
@@ -74,6 +74,25 @@ func TestSubscriptionIDsForPolicyDeduplicatesExplicitIDs(t *testing.T) {
 	for i := range want {
 		if ids[i] != want[i] {
 			t.Fatalf("订阅去重结果错误: got=%v want=%v", ids, want)
+		}
+	}
+}
+
+func TestSortNodesByEgressPreservesOrderWithinGroups(t *testing.T) {
+	nodes := []database.Node{
+		{Name: "LA-Reality-加速"},
+		{Name: "KS-hy2"},
+		{Name: "LA-Hysteria"},
+		{Name: "KS-tu5"},
+		{Name: "OTHER"},
+	}
+
+	sortNodesByEgress(nodes)
+
+	want := []string{"LA-Reality-加速", "LA-Hysteria", "KS-hy2", "KS-tu5", "OTHER"}
+	for i, name := range want {
+		if nodes[i].Name != name {
+			t.Fatalf("排序结果[%d] = %q，期望 %q；完整结果=%v", i, nodes[i].Name, name, nodes)
 		}
 	}
 }
