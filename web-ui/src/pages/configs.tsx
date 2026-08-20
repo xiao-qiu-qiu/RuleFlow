@@ -102,13 +102,13 @@ export default function ConfigsPage() {
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "操作失败"); }
   }
 
-  function toggleNodeId(id: number) {
+  function setNodeSelected(id: number, selected: boolean) {
     setForm((f) => ({
       ...f,
       subscription_ids: [],
       include_all_subscriptions: false,
       node_ids: orderNodeIds(
-        f.node_ids.includes(id) ? f.node_ids.filter((x) => x !== id) : [...f.node_ids, id],
+        selected ? [...f.node_ids, id] : f.node_ids.filter((x) => x !== id),
         ruleflowNodes,
       ),
     }));
@@ -194,12 +194,15 @@ export default function ConfigsPage() {
                 <Label>RuleFlow 节点</Label>
                 <div className="max-h-32 overflow-y-auto space-y-1.5 border rounded-md p-2">
                   {ruleflowNodes.map((n) => (
-                    <label key={n.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                      <Checkbox checked={form.node_ids.includes(n.id)} onCheckedChange={() => toggleNodeId(n.id)} />
+                    <div key={n.id} className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={form.node_ids.includes(n.id)}
+                        onCheckedChange={(checked) => setNodeSelected(n.id, checked)}
+                      />
                       <span className="truncate">{n.name}</span>
                       <Badge variant="outline" className="text-[10px]">{n.protocol}</Badge>
                       {n.source_name && <span className="text-[10px] text-muted-foreground truncate">{n.source_name}</span>}
-                    </label>
+                    </div>
                   ))}
                 </div>
               </div>
