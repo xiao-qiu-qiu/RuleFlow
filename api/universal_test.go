@@ -60,6 +60,24 @@ func TestPolicyTargetForRequestAdaptive(t *testing.T) {
 	}
 }
 
+func TestWriteUniversalResponseSetsContentLength(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	content := []byte("proxies:\n  - name: test\n")
+
+	writeUniversalResponse(recorder, http.StatusOK, content)
+
+	response := recorder.Result()
+	if got, want := response.Header.Get("Content-Length"), "24"; got != want {
+		t.Fatalf("Content-Length = %q, want %q", got, want)
+	}
+	if got, want := response.Header.Get("Cache-Control"), "private, no-store, no-transform"; got != want {
+		t.Fatalf("Cache-Control = %q, want %q", got, want)
+	}
+	if got := recorder.Body.String(); got != string(content) {
+		t.Fatalf("body = %q, want %q", got, content)
+	}
+}
+
 func TestBuildV2RaySubscriptionPreservesRealityAndHysteria2(t *testing.T) {
 	content := `proxies:
   - name: LA Reality

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 
 	"github.com/ablate-ai/RuleFlow/internal/app"
@@ -69,8 +70,7 @@ func (h *Handlers) UniversalSubscription(w http.ResponseWriter, r *http.Request)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		copyUniversalHeaders(w.Header(), response.Header)
-		w.WriteHeader(response.StatusCode)
-		_, _ = w.Write(content)
+		writeUniversalResponse(w, response.StatusCode, content)
 		return
 	}
 
@@ -78,8 +78,7 @@ func (h *Handlers) UniversalSubscription(w http.ResponseWriter, r *http.Request)
 	if target != "v2ray" || response.Header.Get("X-Universal-Target") == "v2ray" {
 		copyUniversalHeaders(w.Header(), response.Header)
 		w.Header().Set("X-Universal-Target", target)
-		w.WriteHeader(response.StatusCode)
-		_, _ = w.Write(content)
+		writeUniversalResponse(w, response.StatusCode, content)
 		return
 	}
 
@@ -95,9 +94,14 @@ func (h *Handlers) UniversalSubscription(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Disposition", `inline; filename="v2rayn-sub.txt"`)
 	w.Header().Set("X-Subscription-Node-Count", fmt.Sprintf("%d", count))
 	w.Header().Set("X-Universal-Target", "v2ray")
-	w.Header().Del("Content-Length")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, encoded+"\n")
+	writeUniversalResponse(w, http.StatusOK, []byte(encoded+"\n"))
+}
+
+func writeUniversalResponse(w http.ResponseWriter, statusCode int, content []byte) {
+	w.Header().Set("Cache-Control", "private, no-store, no-transform")
+	w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+	w.WriteHeader(statusCode)
+	_, _ = w.Write(content)
 }
 
 func universalTargetForRequest(r *http.Request) string {
