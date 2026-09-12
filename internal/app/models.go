@@ -38,6 +38,7 @@ type Proxy struct {
 	AlterID                  int             `yaml:"alterId,omitempty"`
 	Cipher                   string          `yaml:"cipher,omitempty"`
 	Flow                     string          `yaml:"flow,omitempty"`
+	Encryption               string          `yaml:"encryption,omitempty"`
 	TLS                      bool            `yaml:"tls,omitempty"`
 	Alpn                     []string        `yaml:"alpn,omitempty"`
 	Servername               string          `yaml:"servername,omitempty"` // Clash Mihomo VLESS 使用 servername，Stash 使用 sni
@@ -141,6 +142,7 @@ type VLESSOptions struct {
 type RealityConfig struct {
 	PublicKey string `json:"public-key"`
 	ShortID   string `json:"short-id"`
+	MLDSA65   string `json:"mldsa65,omitempty"`
 }
 
 type TLSOptions struct {
@@ -319,6 +321,9 @@ func addVLESSFields(proxy *Proxy, opts map[string]interface{}) {
 	}
 	if flow, ok := opts["flow"].(string); ok {
 		proxy.Flow = flow
+	}
+	if encryption, ok := stringOption(opts, "encryption"); ok && encryption != "" && encryption != "none" {
+		proxy.Encryption = encryption
 	}
 	applyTLSFields(proxy, opts)
 	applyTransportFields(proxy, opts)
@@ -503,7 +508,8 @@ func extractTLSOptions(opts map[string]interface{}) (*TLSOptions, bool) {
 				realityObj := &RealityConfig{}
 				realityObj.PublicKey, _ = stringOption(realityRaw, "public_key")
 				realityObj.ShortID, _ = stringOption(realityRaw, "short_id")
-				if realityObj.PublicKey != "" || realityObj.ShortID != "" {
+				realityObj.MLDSA65, _ = stringOption(realityRaw, "mldsa65", "pqv")
+				if realityObj.PublicKey != "" || realityObj.ShortID != "" || realityObj.MLDSA65 != "" {
 					tlsObj.Reality = realityObj
 				}
 			}

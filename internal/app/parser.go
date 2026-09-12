@@ -244,6 +244,9 @@ func parseVLESSNode(nodeURL string) (*ProxyNode, error) {
 	if flow := query.Get("flow"); flow != "" {
 		opts["flow"] = flow
 	}
+	if encryption := query.Get("encryption"); encryption != "" && encryption != "none" {
+		opts["encryption"] = encryption
+	}
 	alpn := parseALPN(query)
 	tlsObj := map[string]interface{}{}
 	if fingerprint := query.Get("fp"); fingerprint != "" {
@@ -262,17 +265,17 @@ func parseVLESSNode(nodeURL string) (*ProxyNode, error) {
 
 	// Reality 配置
 	if security == "reality" {
-		reality := &RealityConfig{
-			PublicKey: query.Get("pbk"),
-			ShortID:   query.Get("sid"),
+		reality := map[string]interface{}{
+			"enabled":    true,
+			"public_key": query.Get("pbk"),
+			"short_id":   query.Get("sid"),
+		}
+		if pqv := query.Get("pqv"); pqv != "" {
+			reality["mldsa65"] = pqv
 		}
 		if tlsMap, ok := opts["tls"].(map[string]interface{}); ok {
 			tlsMap["enabled"] = true
-			tlsMap["reality"] = map[string]interface{}{
-				"enabled":    true,
-				"public_key": reality.PublicKey,
-				"short_id":   reality.ShortID,
-			}
+			tlsMap["reality"] = reality
 		}
 	}
 

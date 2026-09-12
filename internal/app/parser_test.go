@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -114,6 +115,11 @@ func TestParseVLESSNode(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "VLESS REALITY with PQ encryption",
+			url:     "vless://uuid@example.com:443?encryption=mlkem768x25519plus.0rtt.AAA.BBB&type=tcp&security=reality&pbk=public&sid=abcd&flow=xtls-rprx-vision&pqv=verify&fp=chrome&sni=example.com#HK-vl-reality",
+			wantErr: false,
+		},
+		{
 			name:    "VLESS with WebSocket",
 			url:     "vless://uuid@example.com:443?type=ws&path=/ws&host=cdn.example.com#VLESSWS",
 			wantErr: false,
@@ -132,9 +138,21 @@ func TestParseVLESSNode(t *testing.T) {
 					t.Errorf("parseVLESSNode() Protocol = %v, want vless", got.Protocol)
 				}
 				if tlsObj, ok := got.Options["tls"].(map[string]interface{}); ok {
-					if tt.name == "VLESS with REALITY" {
+					if tt.name == "VLESS with REALITY" || tt.name == "VLESS REALITY with PQ encryption" {
 						if _, ok := tlsObj["reality"].(map[string]interface{}); !ok {
 							t.Fatalf("parseVLESSNode() 缺少 reality tls 配置，got=%#v", tlsObj)
+						}
+					}
+					if tt.name == "VLESS REALITY with PQ encryption" {
+						if got.Options["encryption"] != "mlkem768x25519plus.0rtt.AAA.BBB" {
+							t.Fatalf("parseVLESSNode() encryption=%v", got.Options["encryption"])
+						}
+						if got.Options["flow"] != "xtls-rprx-vision" {
+							t.Fatalf("parseVLESSNode() flow=%v", got.Options["flow"])
+						}
+						reality, _ := tlsObj["reality"].(map[string]interface{})
+						if reality["mldsa65"] != "verify" {
+							t.Fatalf("parseVLESSNode() mldsa65=%v", reality["mldsa65"])
 						}
 					}
 				} else if tt.name != "VLESS with WebSocket" {
@@ -176,6 +194,37 @@ func TestParseVLESSNodeWithGRPCTransport(t *testing.T) {
 	alpn, ok := tlsObj["alpn"].([]string)
 	if !ok || len(alpn) != 2 {
 		t.Fatalf("tls.alpn = %#v, want [h2 http/1.1]", tlsObj["alpn"])
+	}
+}
+
+func TestVLESSPQEncryptionRoundTrip(t *testing.T) {
+	src := "vless://uuid@example.com:443?encryption=mlkem768x25519plus.0rtt.AAA.BBB&flow=xtls-rprx-vision&security=reality&pbk=public&sid=abcd&pqv=verify&fp=chrome&sni=example.com#HK-vl-reality"
+	node, err := parseVLESSNode(src)
+	if err != nil {
+		t.Fatalf("parseVLESSNode() error = %v", err)
+	}
+	link, err := SerializeNodeURL(node.Name, node.Protocol, node.Server, node.Port, node.Options)
+	if err != nil {
+		t.Fatalf("SerializeNodeURL() error = %v", err)
+	}
+	if !strings.Contains(link, "encryption=mlkem768x25519plus.0rtt.AAA.BBB") {
+		t.Fatalf("序列化缺少 encryption: %s", link)
+	}
+	if !strings.Contains(link, "flow=xtls-rprx-vision") {
+		t.Fatalf("序列化缺少 flow: %s", link)
+	}
+	if !strings.Contains(link, "pqv=verify") {
+		t.Fatalf("序列化缺少 pqv: %s", link)
+	}
+
+	proxies, _ := buildProxies([]*ProxyNode{node})
+	if len(proxies) != 1 || proxies[0].Encryption != "mlkem768x25519plus.0rtt.AAA.BBB" {
+		t.Fatalf("Clash encryption 未保留: %#v", proxies)
+	}
+
+	outbounds, _, _ := buildSingBoxOutbounds([]*ProxyNode{node})
+	if len(outbounds) != 1 || outbounds[0]["encryption"] != "mlkem768x25519plus.0rtt.AAA.BBB" {
+		t.Fatalf("sing-box encryption 未保留: %#v", outbounds)
 	}
 }
 

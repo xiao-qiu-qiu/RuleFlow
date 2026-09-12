@@ -157,6 +157,9 @@ func singBoxOutbound(node *ProxyNode, tag string) map[string]interface{} {
 		if flow, ok := stringOption(node.Options, "flow"); ok {
 			outbound["flow"] = flow
 		}
+		if encryption, ok := stringOption(node.Options, "encryption"); ok && encryption != "" && encryption != "none" {
+			outbound["encryption"] = encryption
+		}
 		if tlsObj := singBoxTLSObject(node.Options, node.Server, false); tlsObj != nil {
 			outbound["tls"] = tlsObj
 		}

@@ -61,7 +61,11 @@ func serializeVLESS(name, server string, port int, config map[string]interface{}
 		return "", fmt.Errorf("vless 节点缺少 uuid")
 	}
 	q := url.Values{}
-	q.Set("encryption", "none")
+	encryption := configStr(config, "encryption")
+	if encryption == "" {
+		encryption = "none"
+	}
+	q.Set("encryption", encryption)
 	if flow := configStr(config, "flow"); flow != "" {
 		q.Set("flow", flow)
 	}
@@ -244,6 +248,9 @@ func applyTLSParams(q url.Values, config map[string]interface{}) {
 		}
 		if reality.ShortID != "" {
 			q.Set("sid", reality.ShortID)
+		}
+		if reality.MLDSA65 != "" {
+			q.Set("pqv", reality.MLDSA65)
 		}
 	} else {
 		q.Set("security", "tls")
