@@ -179,11 +179,12 @@ func singBoxOutbound(node *ProxyNode, tag string) map[string]interface{} {
 		}
 		outbound["tls"] = singBoxTLSObject(node.Options, node.Server, true)
 		if obfs, ok := stringOption(node.Options, "obfs"); ok {
-			obfsConfig := map[string]interface{}{"type": obfs}
 			if obfsPassword, passwordOK := stringOption(node.Options, "obfs-password", "obfs_password"); passwordOK {
-				obfsConfig["password"] = obfsPassword
+				outbound["obfs"] = map[string]interface{}{
+					"type":     obfs,
+					"password": obfsPassword,
+				}
 			}
-			outbound["obfs"] = obfsConfig
 		}
 	case "anytls":
 		if password, ok := stringOption(node.Options, "password"); ok {

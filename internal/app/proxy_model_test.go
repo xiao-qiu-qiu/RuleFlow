@@ -59,6 +59,54 @@ func TestHysteria2ObfsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHysteria2EmptyObfsPasswordNotEmitted(t *testing.T) {
+	proxy := &Proxy{Name: "KS-hy2-WARP", Type: "hysteria2", Server: "game.example.com", Port: 31780, UDP: true}
+	opts := map[string]interface{}{
+		"password":      "secret",
+		"obfs":          "salamander",
+		"obfs-password": "",
+		"sni":           "node.example.com",
+	}
+	addHysteria2Fields(proxy, opts)
+	if proxy.Obfs != "" || proxy.ObfsPassword != "" {
+		t.Fatalf("缺 obfs-password 时不应写出 obfs，实际 obfs=%q obfs-password=%q", proxy.Obfs, proxy.ObfsPassword)
+	}
+	out, err := yaml.Marshal(proxy)
+	if err != nil {
+		t.Fatalf("yaml.Marshal() error = %v", err)
+	}
+	yamlStr := string(out)
+	if strings.Contains(yamlStr, "obfs:") {
+		t.Fatalf("缺 obfs-password 时 YAML 仍含 obfs:\n%s", yamlStr)
+	}
+}
+
+func TestSingBoxHysteria2EmptyObfsPasswordNotEmitted(t *testing.T) {
+	nodes := []*ProxyNode{{
+		Protocol: "hysteria2",
+		Name:     "KS-hy2-WARP",
+		Server:   "game.example.com",
+		Port:     31780,
+		Options: map[string]interface{}{
+			"password":      "secret",
+			"obfs":          "salamander",
+			"obfs-password": "",
+			"tls": map[string]interface{}{
+				"enabled":     true,
+				"server_name": "node.example.com",
+			},
+		},
+	}}
+	outbounds, _, _ := buildSingBoxOutbounds(nodes)
+	if len(outbounds) != 1 {
+		t.Fatalf("outbound count = %d, want 1", len(outbounds))
+	}
+	if _, ok := outbounds[0]["obfs"]; ok {
+		t.Fatalf("缺 obfs-password 时 sing-box 仍含 obfs: %#v", outbounds[0]["obfs"])
+	}
+}
+
+
 func TestAddVLESSFieldsFromNestedTLS(t *testing.T) {
 	proxy := &Proxy{Name: "东京", Type: "vless", Server: "154.31.116.16", Port: 45478, UDP: true}
 	opts := map[string]interface{}{

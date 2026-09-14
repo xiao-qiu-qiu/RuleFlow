@@ -345,10 +345,10 @@ func addHysteria2Fields(proxy *Proxy, opts map[string]interface{}) {
 	if password, ok := opts["password"].(string); ok {
 		proxy.Password = password
 	}
-	if obfs, ok := stringOption(opts, "obfs"); ok {
+	obfs, hasObfs := stringOption(opts, "obfs")
+	obfsPassword, hasObfsPassword := stringOption(opts, "obfs-password", "obfs_password")
+	if hasObfs && hasObfsPassword {
 		proxy.Obfs = obfs
-	}
-	if obfsPassword, ok := stringOption(opts, "obfs-password", "obfs_password"); ok {
 		proxy.ObfsPassword = obfsPassword
 	}
 	applyTLSFields(proxy, opts)
