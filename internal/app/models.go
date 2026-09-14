@@ -429,7 +429,7 @@ func applyTLSFields(proxy *Proxy, opts map[string]interface{}) {
 		if tlsObj.UTLS != nil && tlsObj.UTLS.Fingerprint != "" {
 			proxy.Fingerprint = tlsObj.UTLS.Fingerprint
 		}
-		if tlsObj.Reality != nil && (tlsObj.Reality.PublicKey != "" || tlsObj.Reality.ShortID != "") {
+		if tlsObj.Reality != nil && tlsObj.Reality.PublicKey != "" {
 			proxy.Reality = &RealityCfg{
 				PublicKey: tlsObj.Reality.PublicKey,
 				ShortID:   tlsObj.Reality.ShortID,
@@ -506,8 +506,8 @@ func extractTLSOptions(opts map[string]interface{}) (*TLSOptions, bool) {
 			}
 			if realityRaw, ok := value["reality"].(map[string]interface{}); ok {
 				realityObj := &RealityConfig{}
-				realityObj.PublicKey, _ = stringOption(realityRaw, "public_key")
-				realityObj.ShortID, _ = stringOption(realityRaw, "short_id")
+				realityObj.PublicKey, _ = stringOption(realityRaw, "public_key", "public-key", "pbk")
+				realityObj.ShortID, _ = stringOption(realityRaw, "short_id", "short-id", "sid")
 				realityObj.MLDSA65, _ = stringOption(realityRaw, "mldsa65", "pqv")
 				if realityObj.PublicKey != "" || realityObj.ShortID != "" || realityObj.MLDSA65 != "" {
 					tlsObj.Reality = realityObj
@@ -564,14 +564,14 @@ func mergeFlatTLSFields(tlsObj *TLSOptions, opts map[string]interface{}) {
 		}
 	}
 	if tlsObj.Reality == nil {
-		publicKey, _ := stringOption(opts, "pbk", "public-key")
-		shortID, _ := stringOption(opts, "sid", "short-id")
+		publicKey, _ := stringOption(opts, "pbk", "public-key", "public_key")
+		shortID, _ := stringOption(opts, "sid", "short-id", "short_id")
 		// 兼容 Clash YAML 的 reality-opts 嵌套格式（订阅二次转换场景）
 		if realityOpts, ok := nestedMapOption(opts, "reality-opts"); ok {
-			if pk, ok := stringOption(realityOpts, "public-key"); ok && publicKey == "" {
+			if pk, ok := stringOption(realityOpts, "public-key", "public_key", "pbk"); ok && publicKey == "" {
 				publicKey = pk
 			}
-			if si, ok := stringOption(realityOpts, "short-id"); ok && shortID == "" {
+			if si, ok := stringOption(realityOpts, "short-id", "short_id", "sid"); ok && shortID == "" {
 				shortID = si
 			}
 		}

@@ -93,6 +93,82 @@ func TestAddVLESSFieldsFromNestedTLS(t *testing.T) {
 	}
 }
 
+func TestClashStyleRealityOptsEmptyPublicKeyNotEmitted(t *testing.T) {
+	proxy := &Proxy{Name: "KS-vl-reality-WARP", Type: "vless", Server: "edge.example.com", Port: 443, UDP: true}
+	opts := map[string]interface{}{
+		"uuid":               "09abc3d4-4b77-4f4e-bdae-dcfd57efed38",
+		"flow":               "xtls-rprx-vision",
+		"tls":                true,
+		"servername":         "www.example.com",
+		"client-fingerprint": "chrome",
+		"network":            "tcp",
+		"reality-opts": map[string]interface{}{
+			"public-key": "",
+			"short-id":   "890b7432",
+		},
+	}
+	addVLESSFields(proxy, opts)
+	if proxy.Reality != nil {
+		t.Fatalf("缺 public-key 时不应写出 reality-opts，实际为 %#v", proxy.Reality)
+	}
+	out, err := yaml.Marshal(proxy)
+	if err != nil {
+		t.Fatalf("yaml.Marshal() error = %v", err)
+	}
+	if strings.Contains(string(out), "reality-opts:") {
+		t.Fatalf("缺 public-key 时 YAML 仍含 reality-opts:\n%s", out)
+	}
+}
+
+func TestClashStyleRealityOptsPublicKeyEmitted(t *testing.T) {
+	proxy := &Proxy{Name: "KS-vl-reality-WARP", Type: "vless", Server: "edge.example.com", Port: 443, UDP: true}
+	opts := map[string]interface{}{
+		"uuid":               "09abc3d4-4b77-4f4e-bdae-dcfd57efed38",
+		"flow":               "xtls-rprx-vision",
+		"tls":                true,
+		"servername":         "www.example.com",
+		"client-fingerprint": "chrome",
+		"network":            "tcp",
+		"reality-opts": map[string]interface{}{
+			"public-key": "Fnu3wR5hEeonakgRDrgG9yRG9XyM9KScbZlmPzrUXwM",
+			"short-id":   "890b7432",
+		},
+	}
+	addVLESSFields(proxy, opts)
+	if proxy.Reality == nil {
+		t.Fatal("Clash 风格 reality-opts 未映射")
+	}
+	if proxy.Reality.PublicKey != "Fnu3wR5hEeonakgRDrgG9yRG9XyM9KScbZlmPzrUXwM" {
+		t.Fatalf("public-key 错误，got %q", proxy.Reality.PublicKey)
+	}
+	if proxy.Reality.ShortID != "890b7432" {
+		t.Fatalf("short-id 错误，got %q", proxy.Reality.ShortID)
+	}
+}
+
+func TestNestedRealityHyphenKeys(t *testing.T) {
+	proxy := &Proxy{Name: "nested", Type: "vless", Server: "edge.example.com", Port: 443, UDP: true}
+	opts := map[string]interface{}{
+		"uuid": "09abc3d4-4b77-4f4e-bdae-dcfd57efed38",
+		"tls": map[string]interface{}{
+			"enabled":     true,
+			"server_name": "www.example.com",
+			"reality": map[string]interface{}{
+				"public-key": "Fnu3wR5hEeonakgRDrgG9yRG9XyM9KScbZlmPzrUXwM",
+				"short-id":   "890b7432",
+			},
+		},
+	}
+	addVLESSFields(proxy, opts)
+	if proxy.Reality == nil {
+		t.Fatal("hyphen 风格 nested reality 未映射")
+	}
+	if proxy.Reality.PublicKey != "Fnu3wR5hEeonakgRDrgG9yRG9XyM9KScbZlmPzrUXwM" || proxy.Reality.ShortID != "890b7432" {
+		t.Fatalf("nested hyphen keys 映射错误: %#v", proxy.Reality)
+	}
+}
+
+
 func TestAddTrojanFieldsWithWebSocketOptions(t *testing.T) {
 	proxy := &Proxy{Name: "US WS", Type: "trojan", Server: "cdn.wwm.app", Port: 443, UDP: true}
 	opts := map[string]interface{}{
