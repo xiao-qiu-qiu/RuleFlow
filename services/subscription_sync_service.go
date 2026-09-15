@@ -19,6 +19,11 @@ type policyCacheInvalidator interface {
 	DeletePolicyConfig(ctx context.Context, token string) error
 }
 
+type subscriptionSyncPolicyRepository interface {
+	List(ctx context.Context) ([]*database.ConfigPolicy, error)
+	RemapNodeIDs(ctx context.Context, replacements map[int64]int64) error
+}
+
 type preparedSubscriptionSync struct {
 	sub      *database.Subscription
 	nodes    []*app.ProxyNode
@@ -49,7 +54,7 @@ type SubscriptionBatchSyncResult struct {
 type SubscriptionSyncService struct {
 	subRepo     *database.SubscriptionRepo
 	nodeRepo    *database.NodeRepo
-	policyRepo  *database.ConfigPolicyRepo
+	policyRepo  subscriptionSyncPolicyRepository
 	policyCache policyCacheInvalidator
 }
 
@@ -103,7 +108,7 @@ func (s *SubscriptionSyncService) invalidateRelatedPolicyCaches(ctx context.Cont
 			continue
 		}
 		if err := s.policyCache.DeletePolicyConfig(ctx, token); err != nil {
-			log.Printf("[sync] 清理配置缓存失败: subscription_id=%d policy_id=%d token=%s err=%v", subscriptionID, policy.ID, token, err)
+			log.Printf("[sync] 清理配置缓存失败: subscription_id=%d policy_id=%d err=%v", subscriptionID, policy.ID, err)
 			continue
 		}
 		invalidated++
@@ -114,34 +119,36 @@ func (s *SubscriptionSyncService) invalidateRelatedPolicyCaches(ctx context.Cont
 	}
 }
 
-func (s *SubscriptionSyncService) invalidateNodePolicyCaches(ctx context.Context, replacements map[int64]int64) {
-	if len(replacements) == 0 || s.policyRepo == nil || s.policyCache == nil {
-		return
+func (s *SubscriptionSyncService) remapNodePolicies(ctx context.Context, replacements map[int64]int64) error {
+	if len(replacements) == 0 || s.policyRepo == nil {
+		return nil
 	}
+	// Capture references before remapping: afterwards old IDs (including
+	// removed nodes) are no longer present in the policies.
 	policies, err := s.policyRepo.List(ctx)
 	if err != nil {
-		log.Printf("[sync] 查询节点策略缓存失败: err=%v", err)
-		return
+		return fmt.Errorf("查询节点策略缓存失败: %w", err)
 	}
+	var affected []*database.ConfigPolicy
 	for _, policy := range policies {
-		matched := false
 		for _, nodeID := range policy.NodeIDs {
-			for oldID := range replacements {
-				if nodeID == oldID {
-					matched = true
-					break
-				}
-			}
-			if matched {
+			if _, matched := replacements[nodeID]; matched {
+				affected = append(affected, policy)
 				break
 			}
 		}
-		if matched && strings.TrimSpace(policy.Token) != "" {
+	}
+	if err := s.policyRepo.RemapNodeIDs(ctx, replacements); err != nil {
+		return err
+	}
+	for _, policy := range affected {
+		if s.policyCache != nil && strings.TrimSpace(policy.Token) != "" {
 			if err := s.policyCache.DeletePolicyConfig(ctx, policy.Token); err != nil {
 				log.Printf("[sync] 清理节点策略缓存失败: policy_id=%d err=%v", policy.ID, err)
 			}
 		}
 	}
+	return nil
 }
 
 func policyReferencesSubscription(policy *database.ConfigPolicy, subscriptionID int64) bool {
@@ -216,7 +223,7 @@ func (s *SubscriptionSyncService) prepareSubscriptionSync(ctx context.Context, s
 		return preparedSubscriptionSync{sub: sub, err: fmt.Errorf("订阅没有配置 URL: %s", sub.Name)}
 	}
 
-	log.Printf("[sync] 拉取订阅内容: id=%d url=%s", sub.ID, *sub.URL)
+	log.Printf("[sync] 拉取订阅内容: id=%d", sub.ID)
 	content, userInfoHeader, err := s.fetchSubscriptionContent(ctx, *sub.URL)
 	if err != nil {
 		log.Printf("[sync] 拉取失败: id=%d err=%v", sub.ID, err)
@@ -232,6 +239,13 @@ func (s *SubscriptionSyncService) prepareSubscriptionSync(ctx context.Context, s
 	if len(nodes) == 0 {
 		log.Printf("[sync] 未解析到任何节点: id=%d", sub.ID)
 		return preparedSubscriptionSync{sub: sub, err: fmt.Errorf("订阅中没有有效节点")}
+	}
+	nodes, err = applySubscriptionFilter(nodes, sub.FilterRules)
+	if err != nil {
+		return preparedSubscriptionSync{sub: sub, err: err}
+	}
+	if len(nodes) == 0 {
+		return preparedSubscriptionSync{sub: sub, err: fmt.Errorf("订阅过滤后没有可用节点，已保留现有节点与策略选择")}
 	}
 
 	return preparedSubscriptionSync{
@@ -280,12 +294,9 @@ func (s *SubscriptionSyncService) applyPreparedSubscriptionSync(ctx context.Cont
 	if err != nil {
 		return 0, fmt.Errorf("恢复节点顺序失败: %w", err)
 	}
-	if s.policyRepo != nil {
-		if err := s.policyRepo.RemapNodeIDs(ctx, replacements); err != nil {
-			return 0, fmt.Errorf("更新策略节点引用失败: %w", err)
-		}
+	if err := s.remapNodePolicies(ctx, replacements); err != nil {
+		return 0, fmt.Errorf("更新策略节点引用失败: %w", err)
 	}
-	s.invalidateNodePolicyCaches(ctx, replacements)
 
 	now := time.Now()
 	nodeCount := len(dbNodes)
@@ -328,6 +339,7 @@ func (s *SubscriptionSyncService) restoreSubscriptionNodeOrder(ctx context.Conte
 	seen := make(map[int64]struct{}, len(currentNodes))
 	for _, previous := range previousNodes {
 		if previous.SourceID != nil && *previous.SourceID == sourceID {
+			replacements[previous.ID] = 0 // remove references to vanished/filtered nodes
 			if replacement, ok := currentByIdentity[nodeIdentity(previous)]; ok {
 				ordered = append(ordered, replacement)
 				seen[replacement.ID] = struct{}{}

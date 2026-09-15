@@ -45,12 +45,15 @@ func (h *Handlers) UniversalSubscription(w http.ResponseWriter, r *http.Request)
 			policyTarget = "mihomo"
 		}
 		policyToken = derivedPolicyToken(clientToken, policyTarget)
-	} else if _, err := h.configPolicyService.GetByToken(r.Context(), clientToken); err != nil {
+	} else if policy, err := h.configPolicyService.GetByToken(r.Context(), clientToken); err != nil {
 		policyTarget := target
 		if policyTarget == "v2ray" {
 			policyTarget = "mihomo"
 		}
 		policyToken = derivedPolicyToken(clientToken, policyTarget)
+	} else if !universalPolicyTargetCompatible(policy.Target, target) {
+		http.Error(w, "固定格式策略与请求的客户端格式不一致，请使用自适应策略或对应格式的订阅", http.StatusBadRequest)
+		return
 	}
 
 	// 直接调用现有策略生成器，保留缓存、模板、规则和访问日志行为。
@@ -95,6 +98,24 @@ func (h *Handlers) UniversalSubscription(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("X-Subscription-Node-Count", fmt.Sprintf("%d", count))
 	w.Header().Set("X-Universal-Target", "v2ray")
 	writeUniversalResponse(w, http.StatusOK, []byte(encoded+"\n"))
+}
+
+func universalPolicyTargetCompatible(policyTarget, requestedTarget string) bool {
+	if strings.EqualFold(strings.TrimSpace(policyTarget), "adaptive") {
+		return true
+	}
+	normalized, err := resolveConfigTarget(policyTarget, "clash-mihomo")
+	if err != nil {
+		return false
+	}
+	if requestedTarget == "v2ray" {
+		return normalized == "clash-mihomo" || normalized == "stash"
+	}
+	if requestedTarget == "mihomo" {
+		requestedTarget = "clash-mihomo"
+	}
+	requested, err := resolveConfigTarget(requestedTarget, "clash-mihomo")
+	return err == nil && normalized == requested
 }
 
 func writeUniversalResponse(w http.ResponseWriter, statusCode int, content []byte) {

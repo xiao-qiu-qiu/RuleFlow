@@ -796,6 +796,9 @@ func (h *Handlers) ImportNodes(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if created+updated > 0 {
+		h.invalidateNodeConfigCaches(ctx)
+	}
 	SendSuccess(w, map[string]interface{}{
 		"created": created,
 		"updated": updated,
@@ -956,6 +959,7 @@ func (h *Handlers) UpdateNode(w http.ResponseWriter, r *http.Request) {
 		SendError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	h.invalidateNodeConfigCaches(ctx)
 
 	// 获取更新后的节点
 	updatedNode, err := h.nodeService.GetNode(ctx, id)
@@ -1070,6 +1074,7 @@ func (h *Handlers) DeleteNode(w http.ResponseWriter, r *http.Request) {
 		SendError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	h.invalidateNodeConfigCaches(ctx)
 
 	SendSuccess(w, map[string]string{"message": "节点已删除"})
 }
@@ -1103,6 +1108,7 @@ func (h *Handlers) BatchNodeOperation(w http.ResponseWriter, r *http.Request) {
 			SendError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		h.invalidateNodeConfigCaches(ctx)
 		SendSuccess(w, map[string]interface{}{"message": "节点已启用", "count": count})
 
 	case "disable":
@@ -1112,10 +1118,17 @@ func (h *Handlers) BatchNodeOperation(w http.ResponseWriter, r *http.Request) {
 			SendError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		h.invalidateNodeConfigCaches(ctx)
 		SendSuccess(w, map[string]interface{}{"message": "节点已禁用", "count": count})
 
 	default:
 		SendError(w, http.StatusBadRequest, "不支持的操作: "+req.Action)
+	}
+}
+
+func (h *Handlers) invalidateNodeConfigCaches(ctx context.Context) {
+	if h.policyCache != nil {
+		_ = h.policyCache.DeleteAllByPattern(ctx, "ruleflow:policy:config:*")
 	}
 }
 
@@ -1213,29 +1226,13 @@ func (h *Handlers) ConvertSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content, _, err := app.FetchSubscriptionContent(ctx, params.subURL)
-	if err != nil {
-		http.Error(w, "获取订阅失败: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-
-	proxyNodes, err := app.ParseSubscription(content)
-	if err != nil {
-		http.Error(w, "解析订阅失败: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if len(proxyNodes) == 0 {
-		http.Error(w, "订阅中没有可用节点", http.StatusServiceUnavailable)
-		return
-	}
-
 	templateContent := ""
 	targetFallback := "stash"
 	if params.templateID > 0 {
 		var tpl *database.Template
-		tpl, err = h.templateService.GetTemplateByID(ctx, params.templateID)
+		tpl, err = h.templateService.GetPublicTemplateByID(ctx, params.templateID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			http.Error(w, "公开模板不存在", http.StatusNotFound)
 			return
 		}
 		templateContent = tpl.Content
@@ -1245,6 +1242,21 @@ func (h *Handlers) ConvertSubscription(w http.ResponseWriter, r *http.Request) {
 	target, err := resolveConfigTarget(params.target, targetFallback)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	content, _, err := app.FetchPublicSubscriptionContent(ctx, params.subURL)
+	if err != nil {
+		http.Error(w, "获取订阅失败: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	proxyNodes, err := app.ParseSubscription(content)
+	if err != nil {
+		http.Error(w, "解析订阅失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(proxyNodes) == 0 {
+		http.Error(w, "订阅中没有可用节点", http.StatusServiceUnavailable)
 		return
 	}
 

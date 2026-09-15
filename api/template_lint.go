@@ -51,6 +51,7 @@ type ruleSetReference struct {
 	Source      string
 	Format      string
 	Raw         string
+	NoResolve   bool
 }
 
 type yamlRuleProvider struct {
@@ -238,6 +239,9 @@ func loadLocalRuleSetRules(ctx context.Context, h *Handlers, source string) ([]a
 }
 
 func loadRemoteRuleSetRules(ctx context.Context, h *Handlers, ref ruleSetReference) ([]app.RuleSetRule, error) {
+	if ref.Format == "mrs" {
+		return nil, fmt.Errorf("MRS 二进制规则源暂不支持展开检查")
+	}
 	format := strings.TrimSpace(ref.Format)
 	if format == "" {
 		return nil, fmt.Errorf("无法判断规则集格式")
@@ -307,7 +311,7 @@ func lintRuleFromRuleSet(ref ruleSetReference, rule app.RuleSetRule) (lintRule, 
 		Policy:    strings.TrimSpace(ref.Policy),
 		Line:      ref.ParentIndex,
 		Source:    ref.Source,
-		NoResolve: rule.NoResolve,
+		NoResolve: rule.NoResolve || ref.NoResolve,
 	}, true
 }
 
@@ -347,6 +351,13 @@ func parseRuleLine(line string, lineNo int) (lintRule, bool) {
 		if len(parts) >= 3 {
 			rule.Payload = strings.TrimSpace(parts[1])
 			rule.Policy = strings.TrimSpace(parts[2])
+		}
+		if len(parts) > 3 {
+			for _, part := range parts[3:] {
+				if strings.EqualFold(strings.TrimSpace(part), "no-resolve") {
+					rule.NoResolve = true
+				}
+			}
 		}
 		return rule, true
 	default:
@@ -677,9 +688,13 @@ func extractYAMLRuleProviders(content string) (map[string]yamlRuleProvider, erro
 		}
 		urlNode := app.YAMLLookupMappingValue(valueNode, "url")
 		behaviorNode := app.YAMLLookupMappingValue(valueNode, "behavior")
+		format := providerBehaviorToFormat(scalarNodeValue(behaviorNode))
+		if strings.EqualFold(scalarNodeValue(app.YAMLLookupMappingValue(valueNode, "format")), "mrs") {
+			format = "mrs"
+		}
 		providers[name] = yamlRuleProvider{
 			URL:    scalarNodeValue(urlNode),
-			Format: providerBehaviorToFormat(scalarNodeValue(behaviorNode)),
+			Format: format,
 		}
 	}
 
@@ -720,6 +735,7 @@ func buildYAMLRuleSetRefs(rules []string, providers map[string]yamlRuleProvider)
 		if !ok || strings.TrimSpace(provider.URL) == "" {
 			continue
 		}
+		parsedRule, _ := parseRuleLine(rule, i+1)
 
 		refs = append(refs, ruleSetReference{
 			ParentIndex: i + 1,
@@ -728,6 +744,7 @@ func buildYAMLRuleSetRefs(rules []string, providers map[string]yamlRuleProvider)
 			Source:      strings.TrimSpace(provider.URL),
 			Format:      provider.Format,
 			Raw:         rule,
+			NoResolve:   parsedRule.NoResolve,
 		})
 	}
 	return refs

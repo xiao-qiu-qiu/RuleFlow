@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 type RuleSetRule struct {
@@ -15,6 +17,19 @@ type RuleSetRule struct {
 
 func ParseRuleSet(content string, sourceFormat string) ([]RuleSetRule, error) {
 	lines := strings.Split(content, "\n")
+	// Decode quoted and inline YAML payload lists before parsing rule syntax.
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "payload:") {
+			var document struct {
+				Payload []string `yaml:"payload"`
+			}
+			if err := yaml.Unmarshal([]byte(content), &document); err != nil {
+				return nil, fmt.Errorf("解析规则源 YAML 失败: %w", err)
+			}
+			lines = document.Payload
+			break
+		}
+	}
 	rules := make([]RuleSetRule, 0, len(lines))
 
 	for _, rawLine := range lines {
@@ -39,7 +54,7 @@ func ParseRuleSet(content string, sourceFormat string) ([]RuleSetRule, error) {
 			if rule, ok := parseIPListRule(line); ok {
 				rules = append(rules, rule)
 			}
-		case "domain-list":
+		case "domain-list", "clash-domain":
 			if rule, ok := parseDomainListRule(line); ok {
 				rules = append(rules, rule)
 			}

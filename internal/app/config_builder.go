@@ -530,10 +530,27 @@ func yamlRulePolicy(rule string) string {
 
 	ruleType := strings.ToUpper(strings.TrimSpace(parts[0]))
 	switch ruleType {
-	case "MATCH":
+	case "MATCH", "FINAL":
 		return strings.TrimSpace(parts[1])
+	case "SUB-RULE":
+		// SUB-RULE targets a sub-rules entry, not an outbound proxy.
+		return ""
+	case "AND", "OR", "NOT":
+		// Commas inside a logical expression belong to its payload. The
+		// outbound follows the closing parenthesis, before any rule options.
+		if end := strings.LastIndex(rule, ")"); end >= 0 {
+			tail := strings.TrimSpace(rule[end+1:])
+			if strings.HasPrefix(tail, ",") {
+				return strings.TrimSpace(strings.SplitN(tail[1:], ",", 2)[0])
+			}
+		}
+		return ""
 	default:
-		return strings.TrimSpace(parts[len(parts)-1])
+		// Ordinary rules are TYPE,payload,policy[,no-resolve][,src].
+		// The last field may be an option rather than a policy name.
+		if len(parts) >= 3 {
+			return strings.TrimSpace(parts[2])
+		}
+		return ""
 	}
 }
-

@@ -33,6 +33,9 @@ func NewSubscriptionService(repo *database.SubscriptionRepo, cache *cache.Subscr
 
 // CreateSubscription 创建订阅
 func (s *SubscriptionService) CreateSubscription(ctx context.Context, sub *database.Subscription) error {
+	if _, err := applySubscriptionFilter(nil, sub.FilterRules); err != nil {
+		return err
+	}
 	sub.Name = strings.TrimSpace(sub.Name)
 	sub.Description = strings.TrimSpace(sub.Description)
 	if sub.URL != nil {
@@ -85,6 +88,9 @@ func (s *SubscriptionService) ListSubscriptions(ctx context.Context) ([]database
 
 // UpdateSubscription 更新订阅
 func (s *SubscriptionService) UpdateSubscription(ctx context.Context, sub *database.Subscription) error {
+	if _, err := applySubscriptionFilter(nil, sub.FilterRules); err != nil {
+		return err
+	}
 	sub.Name = strings.TrimSpace(sub.Name)
 	sub.Description = strings.TrimSpace(sub.Description)
 	if sub.URL != nil {
@@ -115,11 +121,14 @@ func (s *SubscriptionService) UpdateSubscription(ctx context.Context, sub *datab
 	}
 
 	// 订阅变更后让所有策略配置缓存失效
+	if err := s.repo.Update(ctx, sub); err != nil {
+		return err
+	}
 	if s.cache != nil {
 		_ = s.cache.DeleteAllByPattern(ctx, "ruleflow:policy:config:*")
 	}
 
-	return s.repo.Update(ctx, sub)
+	return nil
 }
 
 // DeleteSubscriptionByID 删除订阅

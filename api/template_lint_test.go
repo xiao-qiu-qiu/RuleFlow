@@ -8,6 +8,44 @@ import (
 	"github.com/ablate-ai/RuleFlow/internal/app"
 )
 
+func TestDomainProviderExpansionAndReferenceNoResolve(t *testing.T) {
+	content := `rule-providers:
+  domain:
+    url: https://example.com/domains.yaml
+    behavior: domain
+  ip:
+    url: https://example.com/ips.yaml
+    behavior: ipcidr
+  binary:
+    url: https://example.com/domains.mrs
+    behavior: domain
+    format: mrs
+rules:
+  - RULE-SET,domain,DIRECT
+  - RULE-SET,ip,DIRECT,no-resolve
+  - RULE-SET,binary,DIRECT
+`
+	_, refs, warnings := collectYAMLLintInputs(content)
+	if len(warnings) != 0 || len(refs) != 3 {
+		t.Fatalf("refs=%v warnings=%v", refs, warnings)
+	}
+	rules, err := app.ParseRuleSet("payload: ['+.example.com']", refs[0].Format)
+	if err != nil || len(expandRuleSetRules(refs[0], rules)) != 1 {
+		t.Fatalf("domain provider expansion failed: %v", err)
+	}
+	ipRules, err := app.ParseRuleSet("payload: ['192.0.2.0/24']", refs[1].Format)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expanded := expandRuleSetRules(refs[1], ipRules)
+	if len(expanded) != 1 || !expanded[0].NoResolve {
+		t.Fatalf("lost provider reference no-resolve: %v", expanded)
+	}
+	if _, err := loadRemoteRuleSetRules(context.Background(), &Handlers{}, refs[2]); err == nil {
+		t.Fatal("binary MRS must not be parsed as a text domain list")
+	}
+}
+
 func TestExtractSurgeRules(t *testing.T) {
 	content := `
 [General]

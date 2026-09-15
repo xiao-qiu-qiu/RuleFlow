@@ -8,6 +8,27 @@ import (
 	"testing"
 )
 
+func TestUniversalFixedPolicyTargetCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		policy, request string
+		want            bool
+	}{
+		{"clash-mihomo", "mihomo", true},
+		{"clash-mihomo", "v2ray", true},
+		{"stash", "v2ray", true},
+		{"clash-mihomo", "sing-box", false},
+		{"clash-mihomo", "stash", false},
+		{"surge", "mihomo", false},
+		{"sing-box", "v2ray", false},
+		{"sing-box", "sing-box", true},
+		{"adaptive", "sing-box", true},
+	} {
+		if got := universalPolicyTargetCompatible(tc.policy, tc.request); got != tc.want {
+			t.Errorf("%s -> %s compatibility = %v, want %v", tc.policy, tc.request, got, tc.want)
+		}
+	}
+}
+
 func TestUniversalTargetForRequest(t *testing.T) {
 	tests := []struct {
 		name      string

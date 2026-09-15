@@ -1,11 +1,71 @@
 package app
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
+
+func TestBuildYAMLRetainsRuleOptionsAndSubRules(t *testing.T) {
+	want := []string{
+		"RULE-SET,cn_ip,DIRECT,no-resolve",
+		"GEOIP,CN,Proxy,src,no-resolve",
+		"IP-CIDR,192.0.2.0/24,REJECT,no-resolve",
+		"IP-CIDR6,2001:db8::/32,DIRECT,no-resolve",
+		"AND,((NETWORK,TCP),(OR,((DST-PORT,80),(DST-PORT,443)))),Proxy",
+		"NOT,((DOMAIN,example.org)),Proxy,no-resolve",
+		"SUB-RULE,(NETWORK,tcp),tcp_rules",
+		"DOMAIN,option-name.example,src",
+		"MATCH,Proxy",
+	}
+	template := `proxy-groups:
+  - name: Proxy
+    type: select
+    proxies: [DIRECT]
+  - name: src
+    type: select
+    proxies: [DIRECT]
+rule-providers:
+  cn_ip:
+    type: inline
+    behavior: ipcidr
+    payload: [192.0.2.0/24]
+sub-rules:
+  tcp_rules: ["MATCH,DIRECT"]
+`
+	inputRules := append([]string{}, want...)
+	inputRules = append(inputRules,
+		"RULE-SET,cn_ip,Missing,no-resolve",
+		"AND,((NETWORK,TCP),(DST-PORT,80)),Missing,no-resolve",
+	)
+	encoded, err := yaml.Marshal(map[string][]string{"rules": inputRules})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"clash-mihomo", "stash"} {
+		t.Run(target, func(t *testing.T) {
+			content, err := BuildYAMLFromTemplateContent(nil, template+string(encoded), target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output struct {
+				Rules    []string            `yaml:"rules"`
+				SubRules map[string][]string `yaml:"sub-rules"`
+			}
+			if err := yaml.Unmarshal([]byte(content), &output); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(output.Rules, want) {
+				t.Fatalf("generated rules changed: got %v, want %v", output.Rules, want)
+			}
+			if !reflect.DeepEqual(output.SubRules["tcp_rules"], []string{"MATCH,DIRECT"}) {
+				t.Fatalf("sub-rules changed: %v", output.SubRules)
+			}
+		})
+	}
+}
 
 func TestBuildYAMLSupportsNegativeLookaheadFilter(t *testing.T) {
 	templateContent := `proxy-groups:

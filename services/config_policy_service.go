@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ablate-ai/RuleFlow/database"
+	"github.com/ablate-ai/RuleFlow/internal/app"
 )
 
 // ConfigPolicyService 配置策略服务
@@ -363,33 +364,38 @@ func (s *ConfigPolicyService) GetPolicyWithNodes(ctx context.Context, policyName
 }
 
 // applySubscriptionFilter 按订阅级过滤规则筛选节点
-func applySubscriptionFilter(nodes []database.Node, f *database.SubscriptionFilter) []database.Node {
+func applySubscriptionFilter(nodes []*app.ProxyNode, f *database.SubscriptionFilter) ([]*app.ProxyNode, error) {
 	if f == nil {
-		return nodes
+		return nodes, nil
 	}
 
 	// 预编译正则（为空则跳过）
 	var excludeRe *regexp.Regexp
 	if f.ExcludeRegex != "" {
-		if re, err := regexp.Compile(f.ExcludeRegex); err == nil {
-			excludeRe = re
+		var err error
+		excludeRe, err = regexp.Compile(f.ExcludeRegex)
+		if err != nil {
+			return nil, fmt.Errorf("订阅排除正则无效: %w", err)
 		}
 	}
 
 	// 协议白名单集合
 	protoWhitelist := make(map[string]bool, len(f.IncludeProtocols))
 	for _, p := range f.IncludeProtocols {
-		protoWhitelist[p] = true
+		if p = strings.ToLower(strings.TrimSpace(p)); p != "" {
+			protoWhitelist[p] = true
+		}
 	}
 
-	filtered := make([]database.Node, 0, len(nodes))
+	filtered := make([]*app.ProxyNode, 0, len(nodes))
 	for _, node := range nodes {
 		nameLower := strings.ToLower(node.Name)
 
 		// 排除关键词（命中任一即排除）
 		excluded := false
 		for _, kw := range f.ExcludeKeywords {
-			if strings.Contains(nameLower, strings.ToLower(kw)) {
+			kw = strings.ToLower(strings.TrimSpace(kw))
+			if kw != "" && strings.Contains(nameLower, kw) {
 				excluded = true
 				break
 			}
@@ -410,5 +416,5 @@ func applySubscriptionFilter(nodes []database.Node, f *database.SubscriptionFilt
 
 		filtered = append(filtered, node)
 	}
-	return filtered
+	return filtered, nil
 }

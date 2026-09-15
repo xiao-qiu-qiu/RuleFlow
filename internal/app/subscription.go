@@ -1,19 +1,28 @@
 package app
 
 import (
-	"context"
+	"bytes"
 	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
+const maxSubscriptionBodyBytes = 64 << 20
+
 // FetchSubscriptionContent 从订阅地址获取原始内容和响应头。
 func FetchSubscriptionContent(ctx context.Context, subURL string) (string, http.Header, error) {
+	return fetchSubscriptionContent(ctx, subURL, &http.Client{Timeout: 30 * time.Second})
+}
+
+func fetchSubscriptionContent(ctx context.Context, subURL string, client *http.Client) (string, http.Header, error) {
 	if subURL == "" {
 		return "", nil, fmt.Errorf("订阅地址不能为空")
 	}
@@ -28,18 +37,12 @@ func FetchSubscriptionContent(ctx context.Context, subURL string) (string, http.
 	req.Header.Set("Accept-Encoding", "gzip, deflate")
 	req.Header.Set("Connection", "keep-alive")
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("重定向次数过多")
-			}
-			return nil
-		},
-	}
-
 	resp, err := client.Do(req)
 	if err != nil {
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err // URL paths and queries may contain subscription credentials.
+		}
 		return "", nil, fmt.Errorf("获取订阅失败（网络错误）: %w", err)
 	}
 	defer resp.Body.Close()
@@ -86,13 +89,19 @@ func readResponseBody(resp *http.Response) ([]byte, error) {
 		reader = gr
 		closeFn = gr.Close
 	case "deflate":
-		zr, err := zlib.NewReader(resp.Body)
+		// zlib.NewReader consumes the header even when it fails. Retry raw
+		// DEFLATE from the beginning, not from the partially consumed body.
+		compressed, err := readLimitedSubscriptionBody(resp.Body, maxSubscriptionBodyBytes)
+		if err != nil {
+			return nil, err
+		}
+		zr, err := zlib.NewReader(bytes.NewReader(compressed))
 		if err == nil {
 			reader = zr
 			closeFn = zr.Close
 			break
 		}
-		fr := flate.NewReader(resp.Body)
+		fr := flate.NewReader(bytes.NewReader(compressed))
 		reader = fr
 		closeFn = fr.Close
 	default:
@@ -103,5 +112,16 @@ func readResponseBody(resp *http.Response) ([]byte, error) {
 		defer closeFn()
 	}
 
-	return io.ReadAll(reader)
+	return readLimitedSubscriptionBody(reader, maxSubscriptionBodyBytes)
+}
+
+func readLimitedSubscriptionBody(reader io.Reader, limit int64) ([]byte, error) {
+	content, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(content)) > limit {
+		return nil, fmt.Errorf("订阅或规则源内容超过大小限制（%d 字节）", limit)
+	}
+	return content, nil
 }

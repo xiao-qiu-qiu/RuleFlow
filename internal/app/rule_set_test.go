@@ -5,6 +5,22 @@ import (
 	"testing"
 )
 
+func TestParseRuleSetYAMLPayloads(t *testing.T) {
+	for _, tc := range []struct {
+		format, body, wantType, wantValue string
+	}{
+		{"clash-domain", "payload:\n  - '+.example.com'\n", "domain_suffix", "example.com"},
+		{"clash-domain", "+.example.com\n", "domain_suffix", "example.com"},
+		{"clash-ipcidr", "payload: ['192.0.2.0/24']", "ip_cidr", "192.0.2.0/24"},
+		{"surge", "payload:\n  - 'DOMAIN-SUFFIX,example.com'\n", "domain_suffix", "example.com"},
+	} {
+		rules, err := ParseRuleSet(tc.body, tc.format)
+		if err != nil || len(rules) != 1 || rules[0].Type != tc.wantType || rules[0].Value != tc.wantValue {
+			t.Errorf("parse %s: rules=%v err=%v", tc.format, rules, err)
+		}
+	}
+}
+
 func TestParseRuleSetClassical(t *testing.T) {
 	content := `
 DOMAIN-SUFFIX,claude.ai,🤖 AI

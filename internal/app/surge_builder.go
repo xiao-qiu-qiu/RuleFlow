@@ -21,6 +21,9 @@ func BuildSurgeFromTemplateContent(nodes []*ProxyNode, templateContent string) (
 		}
 	}
 	clonedNodes = filtered
+	if len(nodes) > 0 && len(clonedNodes) == 0 {
+		return "", fmt.Errorf("没有可用于 Surge 的节点（Surge 不支持 VLESS）")
+	}
 
 	// 收集节点名称
 	nodeNames := make([]string, 0, len(clonedNodes))
@@ -64,10 +67,7 @@ func BuildSurgeFromTemplateContent(nodes []*ProxyNode, templateContent string) (
 	// 用于 [Proxy] section：记录是否已找到 __NODES__ 占位行
 	proxyNodesInserted := false
 	wireGuardSectionsInserted := false
-	// 缓存 [Proxy] section 末尾插入位置
-	pendingProxyLines := []string(nil)
-
-	for idx, rawLine := range lines {
+	for _, rawLine := range lines {
 		line := strings.TrimRight(rawLine, "\r")
 
 		// 识别 section 头
@@ -75,7 +75,6 @@ func BuildSurgeFromTemplateContent(nodes []*ProxyNode, templateContent string) (
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 			// 离开 [Proxy] section 时，若未找到 __NODES__ 则在末尾追加节点
 			if section == "[Proxy]" && !proxyNodesInserted {
-				out = append(out, pendingProxyLines...)
 				out = append(out, nodeLines...)
 				out = append(out, wireGuardSections...)
 				proxyNodesInserted = true
@@ -84,14 +83,10 @@ func BuildSurgeFromTemplateContent(nodes []*ProxyNode, templateContent string) (
 				out = append(out, wireGuardSections...)
 				wireGuardSectionsInserted = true
 			}
-			pendingProxyLines = nil
-
 			section = trimmed
 			out = append(out, line)
 			continue
 		}
-
-		_ = idx // 消除 unused 警告
 
 		switch section {
 		case "[Proxy]":
@@ -100,10 +95,6 @@ func BuildSurgeFromTemplateContent(nodes []*ProxyNode, templateContent string) (
 				out = append(out, nodeLines...)
 				proxyNodesInserted = true
 			} else {
-				// 暂存非占位行，以便在 section 结束时判断是否需要追加
-				if !proxyNodesInserted {
-					pendingProxyLines = append(pendingProxyLines, line)
-				}
 				out = append(out, line)
 			}
 
@@ -127,7 +118,6 @@ func BuildSurgeFromTemplateContent(nodes []*ProxyNode, templateContent string) (
 
 	// 文件末尾若仍在 [Proxy] section 且未插入节点
 	if section == "[Proxy]" && !proxyNodesInserted {
-		out = append(out, pendingProxyLines...)
 		out = append(out, nodeLines...)
 		out = append(out, wireGuardSections...)
 		wireGuardSectionsInserted = true
@@ -340,10 +330,7 @@ func surgeRulePolicy(line string) (string, bool) {
 		return "", false
 	}
 
-	policy := strings.TrimSpace(parts[2-1])
-	if len(parts) >= 3 {
-		policy = strings.TrimSpace(parts[2])
-	}
+	policy := yamlRulePolicy(trimmed)
 	return policy, policy != ""
 }
 
@@ -404,6 +391,9 @@ func BuildSurgeFromDefaultTemplate(nodes []*ProxyNode) (string, error) {
 	}
 
 	var sb strings.Builder
+	if len(nodes) > 0 && len(nodeNames) == 0 {
+		return "", fmt.Errorf("没有可用于 Surge 的节点（Surge 不支持 VLESS）")
+	}
 
 	sb.WriteString("[General]\n")
 	sb.WriteString("loglevel = notify\n")
