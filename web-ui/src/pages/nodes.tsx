@@ -1,4 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { DndContext, DragOverlay, PointerSensor, KeyboardSensor, closestCenter, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { SortableNodeRow } from "@/components/sortable-node-row";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { get, post, put, del, patch } from "@/lib/api";
 import type { Node, NodeStats } from "@/types";
@@ -17,14 +22,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Trash2, Pencil, Upload, Copy, Loader2, Server, CheckSquare, XSquare, GripVertical } from "lucide-react";
 
-type SortMode = "custom" | "default" | "egress" | "name" | "server" | "protocol";
-
-function egressGroup(name: string): string {
-  const trimmed = name.trim();
-  const separator = trimmed.indexOf("-");
-  return (separator > 0 ? trimmed.slice(0, separator) : trimmed).toLocaleLowerCase();
-}
-
 function timeAgo(d: string | null) {
   if (!d) return "从未";
   const ms = Date.now() - new Date(d).getTime();
@@ -39,11 +36,6 @@ function timeAgo(d: string | null) {
 export default function NodesPage() {
   const qc = useQueryClient();
   const [filter, setFilter] = useState({ protocol: "", enabled: "", search: "", source: "" });
-  const [sortMode, setSortMode] = useState<SortMode>(() => {
-    if (typeof window === "undefined") return "egress";
-    const stored = window.localStorage.getItem("ruleflow-node-sort");
-    return stored === "custom" || stored === "default" || stored === "egress" || stored === "name" || stored === "server" || stored === "protocol" ? stored : "egress";
-  });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
@@ -51,6 +43,12 @@ export default function NodesPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [importText, setImportText] = useState("");
   const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [columnWidths, setColumnWidths] = useState<number[]>([]);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   const [form, setForm] = useState({ name: "", protocol: "trojan", server: "", port: 443, config: "{}", enabled: true, tags: "" });
 
   const { data: nodes, isLoading } = useQuery({
@@ -64,7 +62,7 @@ export default function NodesPage() {
 
   const filtered = useMemo(() => {
     if (!nodes) return [];
-    const result = nodes.filter((n) => {
+    return nodes.filter((n) => {
       if (filter.protocol && n.protocol !== filter.protocol) return false;
       if (filter.enabled === "true" && !n.enabled) return false;
       if (filter.enabled === "false" && n.enabled) return false;
@@ -73,28 +71,9 @@ export default function NodesPage() {
       if (filter.source && filter.source !== "manual" && n.source_name !== filter.source) return false;
       return true;
     });
+  }, [nodes, filter]);
 
-    if (sortMode === "custom" || sortMode === "default") return result;
-    const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
-    return result
-      .map((node, index) => ({ node, index }))
-      .sort((a, b) => {
-        if (sortMode === "egress") {
-          const groupCompare = collator.compare(egressGroup(a.node.name), egressGroup(b.node.name));
-          return groupCompare || a.index - b.index;
-        }
-        if (sortMode === "name") return collator.compare(a.node.name, b.node.name) || a.index - b.index;
-        if (sortMode === "server") return collator.compare(`${a.node.server}:${a.node.port}`, `${b.node.server}:${b.node.port}`) || a.index - b.index;
-        return collator.compare(a.node.protocol, b.node.protocol) || a.index - b.index;
-      })
-      .map(({ node }) => node);
-  }, [nodes, filter, sortMode]);
-
-  function changeSortMode(value: string) {
-    const next = value as SortMode;
-    setSortMode(next);
-    window.localStorage.setItem("ruleflow-node-sort", next);
-  }
+  const draggingNode = nodes?.find((node) => node.id === draggingId);
 
   const protocols = useMemo(() => {
     if (!nodes) return [];
@@ -155,24 +134,43 @@ export default function NodesPage() {
   // The server owns the canonical node order. The endpoint is intentionally
   // separate from node editing so reordering does not touch credentials.
   const reorderMut = useMutation({
-    mutationFn: (ids: number[]) => patch("/api/nodes/order", { ids }),
-    onSuccess: () => {
-      toast.success("节点顺序已保存");
-      qc.invalidateQueries({ queryKey: ["nodes"] });
+    mutationFn: (next: Node[]) => patch("/api/nodes/order", { ids: next.map((node) => node.id) }),
+    onMutate: async (next) => {
+      await qc.cancelQueries({ queryKey: ["nodes"] });
+      const previous = qc.getQueryData<Node[]>(["nodes"]);
+      qc.setQueryData(["nodes"], next);
+      return { previous };
     },
-    onError: (e: Error) => toast.error(`保存节点顺序失败：${e.message}`),
+    onSuccess: () => toast.success("节点顺序已保存"),
+    onError: (e: Error, _next, context) => {
+      if (context?.previous) qc.setQueryData(["nodes"], context.previous);
+      toast.error(`保存节点顺序失败，已恢复原顺序：${e.message}`);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["nodes"] }),
   });
 
-  function handleDrop(targetId: number, sourceId = draggingId) {
-    if (sourceId === null || sourceId === targetId || sortMode !== "custom" || !nodes) return;
-    const from = nodes.findIndex((node) => node.id === sourceId);
-    const to = nodes.findIndex((node) => node.id === targetId);
-    if (from < 0 || to < 0) return;
-    const next = [...nodes];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
+  function startDrag({ active }: DragStartEvent) {
+    const row = tableRef.current?.querySelector<HTMLTableRowElement>(`tr[data-node-id="${active.id}"]`);
+    setColumnWidths(row ? Array.from(row.cells, (cell) => cell.getBoundingClientRect().width) : []);
+    setDraggingId(Number(active.id));
+  }
+
+  function clearDrag() {
     setDraggingId(null);
-    reorderMut.mutate(next.map((node) => node.id));
+  }
+
+  function finishDrag({ active, over }: DragEndEvent) {
+    clearDrag();
+    if (!over || active.id === over.id || !nodes || reorderMut.isPending) return;
+    const from = filtered.findIndex((node) => node.id === active.id);
+    const to = filtered.findIndex((node) => node.id === over.id);
+    if (from < 0 || to < 0) return;
+    const reordered = arrayMove(filtered, from, to);
+    const visibleIds = new Set(filtered.map((node) => node.id));
+    let index = 0;
+    // Only replace visible slots: filtering must not move hidden nodes.
+    const next = nodes.map((node) => visibleIds.has(node.id) ? reordered[index++] : node);
+    reorderMut.mutate(next);
   }
 
   function openCreate() {
@@ -223,6 +221,29 @@ export default function NodesPage() {
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "操作失败");
     }
+  }
+
+  function renderNodeCells(node: Node, handle: ReactNode) {
+    return (
+      <>
+        <TableCell><Checkbox checked={selected.has(node.id)} onCheckedChange={() => toggleSelect(node.id)} /></TableCell>
+        <TableCell className="px-1">
+          {handle}
+        </TableCell>
+        <TableCell className="font-medium max-w-[200px] truncate"><span>{node.name}</span></TableCell>
+        <TableCell><Badge variant="outline">{node.protocol}</Badge></TableCell>
+        <TableCell className="text-muted-foreground text-sm"><span>{node.server}:{node.port}</span></TableCell>
+        <TableCell><Badge variant={node.enabled ? "default" : "secondary"}>{node.enabled ? "启用" : "禁用"}</Badge></TableCell>
+        <TableCell className="text-sm text-muted-foreground"><span>{timeAgo(node.last_synced_at)}</span></TableCell>
+        <TableCell className="text-right">
+          <div className="flex justify-end gap-1">
+            <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => copyShareUrl(node.id)}><Copy className="size-3" /></Button>
+            <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => openEdit(node)}><Pencil className="size-3" /></Button>
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-destructive" onClick={() => setDeleteId(node.id)}><Trash2 className="size-3" /></Button>
+          </div>
+        </TableCell>
+      </>
+    );
   }
 
   return (
@@ -276,17 +297,10 @@ export default function NodesPage() {
             {sources.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={sortMode} onValueChange={changeSortMode}>
-          <SelectTrigger className="w-44"><SelectValue placeholder="排序" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="custom">自定义顺序（可拖动）</SelectItem>
-            <SelectItem value="egress">自定义：按出口分组</SelectItem>
-            <SelectItem value="default">默认顺序</SelectItem>
-            <SelectItem value="name">名称排序</SelectItem>
-            <SelectItem value="server">服务器排序</SelectItem>
-            <SelectItem value="protocol">协议排序</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+          {reorderMut.isPending ? <Loader2 className="size-4 animate-spin" /> : <GripVertical className="size-4" />}
+          <span>{reorderMut.isPending ? "正在保存顺序…" : "自定义顺序 · 拖动调整"}</span>
+        </div>
       </div>
 
       {/* Batch actions */}
@@ -305,77 +319,67 @@ export default function NodesPage() {
       {isLoading ? (
         <Skeleton className="h-64 rounded-xl" />
       ) : (
-        <Card className="overflow-hidden">
-          <Table containerClassName="max-h-[calc(100vh-280px)] overflow-y-auto">
-            <TableHeader className="sticky top-0 z-10 bg-card">
-              <TableRow>
-                <TableHead className="w-10"><Checkbox checked={selected.size === filtered.length && filtered.length > 0} onCheckedChange={toggleAll} /></TableHead>
-                <TableHead className="w-10" aria-label="排序" />
-                <TableHead>名称</TableHead>
-                <TableHead>协议</TableHead>
-                <TableHead>服务器</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>同步时间</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((node) => (
-                <TableRow
-                  key={node.id}
-                  onDragOver={(event) => {
-                    if (sortMode !== "custom" || draggingId === null) return;
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    const rawSourceId = event.dataTransfer.getData("text/plain");
-                    const sourceId = rawSourceId ? Number(rawSourceId) : draggingId;
-                    handleDrop(node.id, Number.isFinite(sourceId) ? sourceId : draggingId);
-                  }}
-                  className={draggingId === node.id ? "opacity-50" : undefined}
-                >
-                  <TableCell><Checkbox checked={selected.has(node.id)} onCheckedChange={() => toggleSelect(node.id)} /></TableCell>
-                  <TableCell className="px-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      draggable={sortMode === "custom"}
-                      disabled={sortMode !== "custom" || reorderMut.isPending}
-                      title={sortMode === "custom" ? "拖动调整顺序" : "切换到自定义顺序后可拖动"}
-                      aria-label="拖动调整顺序"
-                      onDragStart={(event) => {
-                        setDraggingId(node.id);
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", String(node.id));
-                      }}
-                      onDragEnd={() => setDraggingId(null)}
-                    >
-                      <GripVertical className="size-4 text-muted-foreground" />
-                    </Button>
-                  </TableCell>
-                  <TableCell className="font-medium max-w-[200px] truncate">{node.name}</TableCell>
-                  <TableCell><Badge variant="outline">{node.protocol}</Badge></TableCell>
-                  <TableCell className="text-muted-foreground text-sm">{node.server}:{node.port}</TableCell>
-                  <TableCell><Badge variant={node.enabled ? "default" : "secondary"}>{node.enabled ? "启用" : "禁用"}</Badge></TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{timeAgo(node.last_synced_at)}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => copyShareUrl(node.id)}><Copy className="size-3" /></Button>
-                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => openEdit(node)}><Pencil className="size-3" /></Button>
-                      <Button variant="ghost" size="sm" className="h-7 px-2 text-destructive" onClick={() => setDeleteId(node.id)}><Trash2 className="size-3" /></Button>
-                    </div>
-                  </TableCell>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToVerticalAxis]}
+          onDragStart={startDrag}
+          onDragEnd={finishDrag}
+          onDragCancel={clearDrag}
+          accessibility={{
+            screenReaderInstructions: { draggable: "按空格开始排序，用上下方向键移动，再按空格放下；按 Escape 取消。" },
+            announcements: {
+              onDragStart: ({ active }) => `已拿起 ${nodes?.find((node) => node.id === active.id)?.name ?? "节点"}。`,
+              onDragOver: ({ over }) => over ? `将放到当前列表第 ${filtered.findIndex((node) => node.id === over.id) + 1} 位。` : "已移出列表。",
+              onDragEnd: ({ over }) => over ? "已放下节点。" : "已取消排序。",
+              onDragCancel: () => "已取消排序，顺序未改变。",
+            },
+          }}
+        >
+          <Card className="overflow-hidden">
+            <Table ref={tableRef} containerClassName="max-h-[calc(100vh-280px)] overflow-y-auto">
+              <TableHeader className="sticky top-0 z-10 bg-card">
+                <TableRow>
+                  <TableHead className="w-10"><Checkbox checked={selected.size === filtered.length && filtered.length > 0} onCheckedChange={toggleAll} /></TableHead>
+                  <TableHead className="w-10" aria-label="排序" />
+                  <TableHead>名称</TableHead>
+                  <TableHead>协议</TableHead>
+                  <TableHead>服务器</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>同步时间</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
                 </TableRow>
-              ))}
-              {!filtered.length && (
-                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">暂无节点</TableCell></TableRow>
+              </TableHeader>
+              <SortableContext items={filtered.map((node) => node.id)} strategy={verticalListSortingStrategy}>
+                <TableBody>
+                  {filtered.map((node) => (
+                    <SortableNodeRow key={node.id} id={node.id} name={node.name} disabled={reorderMut.isPending}>
+                      {(handle) => renderNodeCells(node, handle)}
+                    </SortableNodeRow>
+                  ))}
+                  {!filtered.length && (
+                    <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">暂无节点</TableCell></TableRow>
+                  )}
+                </TableBody>
+              </SortableContext>
+            </Table>
+          </Card>
+          {createPortal(
+            <DragOverlay dropAnimation={{ duration: 180, easing: "ease-out" }}>
+              {draggingNode && (
+                <div className="relative cursor-grabbing" style={{ width: columnWidths.reduce((sum, width) => sum + width, 0) }}>
+                  <div className="absolute -top-7 left-2 rounded-md bg-sky-400 px-2 py-1 text-xs font-semibold text-slate-950 shadow-md">
+                    松开放到这里
+                  </div>
+                  <table aria-hidden="true" inert className="w-full table-fixed bg-card text-sm shadow-xl ring-2 ring-sky-400">
+                    <colgroup>{columnWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+                    <TableBody><TableRow>{renderNodeCells(draggingNode, <GripVertical className="mx-auto size-4 text-sky-400" />)}</TableRow></TableBody>
+                  </table>
+                </div>
               )}
-            </TableBody>
-          </Table>
-        </Card>
+            </DragOverlay>, document.body,
+          )}
+        </DndContext>
       )}
 
       {/* Create/Edit Dialog */}
