@@ -396,7 +396,7 @@ rule-providers:
     interval: 43200
     url: /rulesets/need_proxy?target=clash-classical
     path: ./ruleflow_ruleset/need_proxy.txt
-    
+
 rules:
   # Source and process overrides must precede shared domain rules.
   - PROCESS-NAME,com.zhiliaoapp.musically,📺 Stream
