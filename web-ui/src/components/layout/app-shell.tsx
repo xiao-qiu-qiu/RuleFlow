@@ -28,7 +28,9 @@ import {
 } from "lucide-react";
 
 // 仓库地址（左侧底部 GitHub 链接）
-const GITHUB_URL = "https://github.com/0xUnixIO/RuleFlow";
+const GITHUB_REPO = "xiao-qiu-qiu/RuleFlow";
+const GITHUB_URL = `https://github.com/${GITHUB_REPO}`;
+const GITHUB_API = `https://api.github.com/repos/${GITHUB_REPO}`;
 
 // GitHub 图标（lucide-react 已移除品牌图标，故内联 SVG）
 function GithubIcon({ className }: { className?: string }) {
@@ -75,13 +77,41 @@ export default function AppShell() {
       });
   }, []);
 
-  // 检查更新：对比 GitHub 最新 Release
+  // Commit builds follow the fork's main branch; tagged builds follow its releases.
   const handleCheckUpdate = useCallback(async () => {
     setChecking(true);
     try {
+      const current = version.trim();
+      if (/^[0-9a-f]{7,40}$/i.test(current)) {
+        const res = await fetch(`${GITHUB_API}/commits/main`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`GitHub HTTP ${res.status}`);
+        const data = (await res.json()) as { sha?: string };
+        if (!data.sha || !/^[0-9a-f]{40}$/i.test(data.sha)) throw new Error("未获取到最新提交");
+        if (data.sha.toLowerCase().startsWith(current.toLowerCase())) {
+          toast.success(`已是最新版本 ${current}`);
+        } else {
+          toast.info(`发现新版本 ${data.sha.slice(0, 7)}`, {
+            description: `当前版本 ${current} · ${GITHUB_REPO}`,
+            action: { label: "查看", onClick: () => window.open(`${GITHUB_URL}/commit/${data.sha}`, "_blank", "noopener,noreferrer") },
+          });
+        }
+        return;
+      }
+      if (!/^v?\d+\.\d+\.\d+(?:[-+].*)?$/.test(current)) {
+        toast.info("当前构建未提供可比较的版本号", {
+          action: { label: "查看仓库", onClick: () => window.open(GITHUB_URL, "_blank", "noopener,noreferrer") },
+        });
+        return;
+      }
       const res = await fetch(
-        "https://api.github.com/repos/0xUnixIO/RuleFlow/releases/latest"
+        `${GITHUB_API}/releases/latest`, { cache: "no-store" }
       );
+      if (res.status === 404) {
+        toast.info("你的 RuleFlow fork 暂无发布版本", {
+          action: { label: "查看仓库", onClick: () => window.open(GITHUB_URL, "_blank", "noopener,noreferrer") },
+        });
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { tag_name?: string; html_url?: string };
       const latest = data.tag_name;
@@ -95,7 +125,7 @@ export default function AppShell() {
           description: `当前版本 ${version || "未知"}`,
           action: {
             label: "查看",
-            onClick: () => window.open(data.html_url || GITHUB_URL, "_blank"),
+            onClick: () => window.open(data.html_url || GITHUB_URL, "_blank", "noopener,noreferrer"),
           },
         });
       }

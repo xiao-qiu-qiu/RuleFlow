@@ -1,5 +1,6 @@
 import { $ } from "bun";
 import { cpSync, mkdirSync, existsSync } from "fs";
+import { createHash } from "node:crypto";
 
 const isWatch = process.argv.includes("--watch");
 const isMinify = process.argv.includes("--minify");
@@ -42,6 +43,11 @@ const jsPath = entryPath
 // Build Tailwind CSS
 const minifyFlag = isMinify ? "--minify" : "";
 await $`bunx @tailwindcss/cli -i src/index.css -o dist/assets/index.css ${minifyFlag}`.quiet();
+// A fixed CSS URL can stay cached while the hashed JS has already updated.
+const css = await Bun.file("dist/assets/index.css").arrayBuffer();
+const cssHash = createHash("sha256").update(new Uint8Array(css)).digest("hex").slice(0, 12);
+const cssPath = `/assets/index-${cssHash}.css`;
+await Bun.write(`dist${cssPath}`, css);
 
 // Copy public assets
 if (existsSync("public")) {
@@ -55,7 +61,7 @@ const html = `<!DOCTYPE html>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <link rel="stylesheet" href="/assets/index.css" />
+  <link rel="stylesheet" href="${cssPath}" />
   <title>RuleFlow</title>
 </head>
 <body>
