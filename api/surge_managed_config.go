@@ -101,7 +101,25 @@ func applyBaseURLFromEnv(u *url.URL, envName string) bool {
 	if parsed.Host != "" {
 		u.Host = parsed.Host
 	}
+	applyBasePath(u, parsed.Path)
 	return parsed.Scheme != "" && parsed.Host != ""
+}
+
+// applyBasePath 把 PUBLIC_BASE_URL 里的路径前缀（例如 /7f3a9c）并入请求路径。
+// 反向代理把面板挂在随机路径下时，生成的绝对 URL（订阅、规则集）才不会丢掉前缀。
+func applyBasePath(u *url.URL, basePath string) bool {
+	prefix := strings.TrimRight(strings.TrimSpace(basePath), "/")
+	if prefix == "" || prefix == "/" {
+		return false
+	}
+	if u.Path == prefix || strings.HasPrefix(u.Path, prefix+"/") {
+		return false
+	}
+	u.Path = prefix + u.Path
+	if u.RawPath != "" {
+		u.RawPath = prefix + u.RawPath
+	}
+	return true
 }
 
 func forwardedProto(r *http.Request) string {

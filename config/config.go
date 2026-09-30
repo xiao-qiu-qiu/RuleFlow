@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -30,6 +31,13 @@ type Config struct {
 	LogKeepDays      int
 	LogMaxRecords    int
 	LogCheckInterval int
+
+	// 入口网关：随机入口路径 + 伪装页
+	// EntryPath 为空表示关闭该功能，行为与旧版本一致
+	EntryPath string
+	// EntryCookie 是放行面板内部请求（绝对路径跳转、/api、/assets）的 cookie 值
+	// 留空时由 EntryPath 派生
+	EntryCookie string
 }
 
 // Load 从环境变量加载配置
@@ -47,7 +55,23 @@ func Load() *Config {
 		LogKeepDays:        getEnvInt("LOG_KEEP_DAYS", 30),
 		LogMaxRecords:      getEnvInt("LOG_MAX_RECORDS", 10000),
 		LogCheckInterval:   getEnvInt("LOG_CHECK_INTERVAL", 1),
+		EntryPath:          normalizeEntryPath(getEnv("RF_ENTRY_PATH", "")),
+		EntryCookie:        strings.TrimSpace(getEnv("RF_ENTRY_COOKIE", "")),
 	}
+}
+
+// normalizeEntryPath 把入口路径规范成 "/xxx"（无尾斜杠、必须带前导斜杠）
+// 空值或 "/" 返回空字符串，表示关闭入口网关
+func normalizeEntryPath(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	value = "/" + strings.Trim(value, "/")
+	if value == "/" {
+		return ""
+	}
+	return value
 }
 
 func getEnv(key, defaultValue string) string {

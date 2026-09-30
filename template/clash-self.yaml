@@ -74,7 +74,7 @@ dns:
         "+.cn":
             - https://dns.alidns.com/dns-query#DIRECT
             - https://doh.pub/dns-query#DIRECT
-        "sub.xqqq.ccwu.cc,www.stellar.cc.cd,+.jsdelivr.net":
+        "s7k3x.044449.xyz,+.jsdelivr.net":
             - https://dns.alidns.com/dns-query#DIRECT
             - https://doh.pub/dns-query#DIRECT
         "+.8008205555.cn,+.8008205555.com,+.cignacmb-ipmi.com,+.cignacmb.com,+.cignacmbamc.com,+.cmb-leasing.com,+.cmbchina.biz,+.cmbchina.cn,+.cmbchina.com,+.cmbimg.cn,+.cmbimg.com,+.cmbt.cn,+.cmbuat.com,+.cmburl.cn,+.cmf.biz,+.cmf.ltd,+.cmfchina.com,+.cmfunds.cn,+.test-cignacmb.com,+.joying.com":
@@ -401,11 +401,19 @@ rules:
   # Source and process overrides must precede shared domain rules.
   - PROCESS-NAME,com.zhiliaoapp.musically,📺 Stream
   - PROCESS-NAME,com.ss.android.ugc.aweme,DIRECT
+  # Google comparison overrides precede shared domain/IP providers.
+  - DOMAIN,dl.google.com,🚀 Proxy
+  - DOMAIN,update.googleapis.com,🚀 Proxy
+  - DOMAIN,edgedl.me.gvt1.com,🚀 Proxy
+  - DOMAIN,redirector.gvt1.com,🚀 Proxy
+  - DOMAIN,beacons.gvt2.com,🚀 Proxy
+  - DOMAIN-SUFFIX,doubleclick.net,REJECT
+  - DOMAIN-SUFFIX,googleadservices.com,REJECT
+  - DOMAIN-SUFFIX,adservice.google.com,REJECT
   - DOMAIN-KEYWORD,stripe,🚀 Proxy
   - RULE-SET,speedtest,🚀 Proxy
   # Critical allowlists must precede remote reject providers.
-  - DOMAIN,sub.xqqq.ccwu.cc,DIRECT
-  - DOMAIN,www.stellar.cc.cd,DIRECT
+  - DOMAIN,s7k3x.044449.xyz,DIRECT
   - DOMAIN-SUFFIX,jsdelivr.net,DIRECT
   - DOMAIN-SUFFIX,8008205555.cn,DIRECT
   - DOMAIN-SUFFIX,8008205555.com,DIRECT

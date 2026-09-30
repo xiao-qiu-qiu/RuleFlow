@@ -7,3 +7,6 @@ var webFS embed.FS
 
 //go:embed migrations
 var migrationsFS embed.FS
+
+//go:embed cover
+var coverFS embed.FS

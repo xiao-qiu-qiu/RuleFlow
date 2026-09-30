@@ -146,9 +146,21 @@ func main() {
 
 	// 优雅关闭
 	r := setupRoutes(cfg, sessionSecret, apiHandlers, backupHandlers, adminUserRepo)
+
+	// 入口网关：随机入口路径 + 伪装页（RF_ENTRY_PATH 为空时关闭）
+	var handler http.Handler = r
+	if cfg.EntryPath != "" {
+		coverHTML, err := loadCoverPage()
+		if err != nil {
+			log.Fatalf("❌ 加载伪装页失败: %v\n", err)
+		}
+		handler = newEntryGate(r, cfg.EntryPath, cfg.EntryCookie, coverHTML)
+		log.Printf("🚪 入口网关已启用：入口 %s/ ，其他路径返回伪装页\n", cfg.EntryPath)
+	}
+
 	server := &http.Server{
 		Addr:    ":" + port,
-		Handler: api.LoggingMiddleware(api.CORSMiddleware(cfg.CORSAllowedOrigins)(api.RecoveryMiddleware(r))),
+		Handler: api.LoggingMiddleware(api.CORSMiddleware(cfg.CORSAllowedOrigins)(api.RecoveryMiddleware(handler))),
 	}
 
 	go func() {
