@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Copy, ExternalLink, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
+import { publicUrl } from "@/lib/public-url";
 
 interface PublicTemplate { id: number; name: string; target: string; content?: string; }
 
@@ -56,7 +57,7 @@ export default function ConverterPage() {
   }, [templateId]);
 
   const convertUrl = subUrl && templateId
-    ? `${window.location.origin}/convert?url=${encodeURIComponent(subUrl)}&target=${target}&template=${templateId}`
+    ? publicUrl(`/convert?url=${encodeURIComponent(subUrl)}&target=${target}&template=${templateId}`)
     : "";
 
   const fetchPreview = useCallback(async () => {

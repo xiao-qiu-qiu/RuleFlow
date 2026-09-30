@@ -25,6 +25,7 @@ import {
   RefreshCw,
   PanelLeft,
   X,
+  LogOut,
 } from "lucide-react";
 
 // 仓库地址（左侧底部 GitHub 链接）
@@ -277,6 +278,19 @@ export default function AppShell() {
                 className={cn("size-3.5", checking && "animate-spin")}
               />
               {checking ? "检查中…" : "检查更新"}
+            </Button>
+
+            {/* 退出登录：走服务端 /logout（清 session cookie 后跳回登录页） */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-start gap-2 border-sidebar-border text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              onClick={() => {
+                window.location.href = "/logout";
+              }}
+            >
+              <LogOut className="size-3.5" />
+              退出登录
             </Button>
 
             {/* GitHub 链接与版本号 */}

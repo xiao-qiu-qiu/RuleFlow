@@ -53,6 +53,12 @@ func requestURLString(r *http.Request) string {
 	return u.String()
 }
 
+// PublicBaseURL 返回对外可用的公开地址（优先 PUBLIC_BASE_URL，其次请求的转发头），
+// 供 SPA 拼接订阅 / 规则集 / 转换链接使用。面板挂在随机路径下时它已包含路径前缀。
+func PublicBaseURL(r *http.Request) string {
+	return requestBaseURLString(r)
+}
+
 func requestBaseURLString(r *http.Request) string {
 	if r == nil || r.URL == nil {
 		return ""

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { get, post, put, del } from "@/lib/api";
+import { publicUrl } from "@/lib/public-url";
 import type { RuleSource } from "@/types";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -117,7 +118,7 @@ export default function RuleSourcesPage() {
   }
 
   async function copyExportUrl(name: string, target: string, label: string) {
-    const url = `${window.location.origin}/rulesets/${encodeURIComponent(name)}?target=${encodeURIComponent(target)}`;
+    const url = publicUrl(`/rulesets/${encodeURIComponent(name)}?target=${encodeURIComponent(target)}`);
     await navigator.clipboard.writeText(url);
     toast.success(`${label} 导出 URL 已复制`);
   }

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { get, post, put, del } from "@/lib/api";
+import { publicUrl } from "@/lib/public-url";
 import type { ConfigPolicy, ConfigPolicyForm, ConfigTarget, Template, Node } from "@/types";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -90,7 +91,7 @@ export default function ConfigsPage() {
 
   async function copySubscribeUrl(token: string, target: ConfigTarget) {
     const path = target === "adaptive" ? "/universal-sub" : "/subscribe";
-    const url = `${window.location.origin}${path}?token=${token}`;
+    const url = publicUrl(`${path}?token=${token}`);
     await navigator.clipboard.writeText(url);
     toast.success("订阅 URL 已复制");
   }

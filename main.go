@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -147,15 +148,15 @@ func main() {
 	// 优雅关闭
 	r := setupRoutes(cfg, sessionSecret, apiHandlers, backupHandlers, adminUserRepo)
 
-	// 入口网关：随机入口路径 + 伪装页（RF_ENTRY_PATH 为空时关闭）
+	// 入口网关：面板入口 / 订阅入口 + 伪装页（两者都为空时关闭）
 	var handler http.Handler = r
-	if cfg.EntryPath != "" {
+	if cfg.EntryPath != "" || cfg.SubPath != "" {
 		coverHTML, err := loadCoverPage()
 		if err != nil {
 			log.Fatalf("❌ 加载伪装页失败: %v\n", err)
 		}
-		handler = newEntryGate(r, cfg.EntryPath, cfg.EntryCookie, coverHTML)
-		log.Printf("🚪 入口网关已启用：入口 %s/ ，其他路径返回伪装页\n", cfg.EntryPath)
+		handler = newEntryGate(r, cfg.EntryPath, cfg.SubPath, cfg.EntryCookie, coverHTML)
+		log.Printf("🚪 入口网关已启用：面板入口 %q ，订阅入口 %q ，其他路径返回伪装页\n", cfg.EntryPath, cfg.SubPath)
 	}
 
 	server := &http.Server{
@@ -203,7 +204,7 @@ func setupRoutes(cfg *config.Config, sessionSecret string, apiHandlers *api.Hand
 	serveSPA := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
-		w.Write(indexHTML)
+		w.Write(injectPublicBase(indexHTML, api.PublicBaseURL(r)))
 	})
 
 	fileServer := http.FileServer(http.FS(distFS))
@@ -396,4 +397,22 @@ func setupRoutes(cfg *config.Config, sessionSecret string, apiHandlers *api.Hand
 	})
 
 	return r
+}
+
+// injectPublicBase 把对外公开地址注入 SPA HTML。
+// 面板挂在随机路径下时，前端需要知道带前缀的公开地址，复制出来的订阅 / 规则集 /
+// 转换链接才能直接使用（否则复制出来的地址会缺前缀而 404）。
+func injectPublicBase(indexHTML []byte, base string) []byte {
+	if base == "" {
+		return indexHTML
+	}
+	quoted, err := json.Marshal(base)
+	if err != nil {
+		return indexHTML
+	}
+	script := []byte("<script>window.__RF_PUBLIC_BASE__=" + string(quoted) + ";</script>")
+	if bytes.Contains(indexHTML, []byte("</head>")) {
+		return bytes.Replace(indexHTML, []byte("</head>"), append(script, "</head>"...), 1)
+	}
+	return append(script, indexHTML...)
 }

@@ -38,6 +38,10 @@ type Config struct {
 	// EntryCookie 是放行面板内部请求（绝对路径跳转、/api、/assets）的 cookie 值
 	// 留空时由 EntryPath 派生
 	EntryCookie string
+	// SubPath 是订阅/规则集下发的独立入口，只放行 /subscribe、/universal-sub、
+	// /rulesets/*、/convert，且不会写入入口 cookie（拿到订阅地址不等于能进面板）。
+	// 留空表示订阅与面板共用 EntryPath。
+	SubPath string
 }
 
 // Load 从环境变量加载配置
@@ -57,6 +61,7 @@ func Load() *Config {
 		LogCheckInterval:   getEnvInt("LOG_CHECK_INTERVAL", 1),
 		EntryPath:          normalizeEntryPath(getEnv("RF_ENTRY_PATH", "")),
 		EntryCookie:        strings.TrimSpace(getEnv("RF_ENTRY_COOKIE", "")),
+		SubPath:            normalizeEntryPath(getEnv("RF_SUB_PATH", "")),
 	}
 }
 
